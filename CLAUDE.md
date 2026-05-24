@@ -31,9 +31,9 @@ AppProvider (src/context/app-context.tsx)
        │    ├─ flashcards.tsx    Weekly flashcard engine (English-front / Arabic-back)
        │    ├─ log.tsx           Session log + bar chart
        │    ├─ resources.tsx     Filterable resource list
-       │    └─ settings.tsx      Appearance, week picker, API key input, modal launchers
+       │    └─ settings.tsx      Appearance, week picker, API key input, Weekly Resource editor, modal launchers
        ├─ (modal)/_layout.tsx  →  presentation: 'modal'
-       │    ├─ checkin.tsx        Weekly check-in form + AI coach
+       │    ├─ checkin.tsx        Weekly check-in form (no AI — saves form data, shows "Check-in saved!")
        │    └─ roadmap.tsx        12-week read-only plan
        └─ archive.tsx            Vocabulary archive (pushed from flashcards screen, not a tab)
 ```
@@ -42,20 +42,29 @@ AppProvider (src/context/app-context.tsx)
 
 All persistent app state lives in `useAppContext()`. The provider calls `initDb()` on mount, then loads settings, badges, and the current week's flashcards into React state. Every write action writes to SQLite first, then updates React state — no optimistic updates.
 
-Key state: `streak`, `xpTotal`, `unlockedBadges`, `settings` (UserSettings), `pendingCheckIn`, `isDbReady`, `newBatchReady`, `currentWeekCards` (FlashcardArchiveEntry[]), `generatingBatch`.
+Key state: `streak`, `xpTotal`, `unlockedBadges`, `settings` (UserSettings), `pendingCheckIn`, `isDbReady`, `currentWeekCards` (FlashcardArchiveEntry[]), `weekCompleteInfo` (`{ completedWeek: number } | null`).
 
-Key actions: `logSession`, `saveFlashcardBatch`, `saveCheckIn`, `patchSettings`, `triggerConfetti`, `refreshStats`, `markCard(id, status)`, `dismissNewBatch`, `triggerWeeklyGeneration`.
+Key actions: `logSession`, `saveFlashcardBatch`, `saveCheckIn`, `patchSettings`, `triggerConfetti`, `refreshStats`, `markCard(id, status)`, `importWeeklyCards(weekNumber, rawCards)`, `dismissWeekComplete`.
 
 `isDbReady` gates all screen renders — show a spinner until `true`.
 
-### Weekly flashcard generation
+### Flashcard import and Anki-style study
 
-On `loadState()`, AppContext checks whether `flashcard_archive` has rows for the current `settings.current_week`. If not, and if `settings.api_key` is set, it calls `generateBatch()` in the background. The topic is determined by week number:
+Cards are imported manually via a JSON paste modal — there is no AI generation of flashcards. The "Import +" button in the flashcard screen opens an `ImportModal` where the user pastes a JSON array. Each item must have `english`, `arabic`, `transliteration`, `situation` string fields. `importWeeklyCards` deletes existing archive cards for the week then inserts the new batch.
 
-- Weeks 1–10: fixed rotation from `FLASHCARD_TOPICS` (index = `(weekNumber - 1) % 10`)
-- Weeks 11–12: the topic with the most `status = 'unknown'` cards in the archive (`getMostUnknownTopic()`)
+The study queue is Anki-style:
 
-When `patchSettings({ api_key })` is called with a non-empty key and no cards exist yet, generation is also triggered immediately. The `newBatchReady` flag is set to `true` after a successful generate so the dashboard can show a banner.
+- **Again** — re-inserts the card 2 positions ahead in the queue
+- **Hard** — moves the card to the end of the queue
+- **Good** — marks the card `known` (via `markCard`) and removes it from the queue
+
+Rating buttons appear only after the card is flipped. Flipping is an instant state toggle (no animation). `cards_flipped` (`0|1`) in `UserSettings` persists the orientation preference (0 = English front, 1 = Arabic front); toggled via the ⇄ button in the top bar.
+
+When all cards have been rated Good the session ends and `saveFlashcardBatch` is called (only for the current week, not archive review runs).
+
+### End-of-week logic
+
+On Sunday, `loadState()` calls `getFlashcardReviewForWeek(current_week)`. If a review row exists (i.e. the user completed a session this week) and `current_week < 12`, AppContext increments `current_week`, picks a random known card as the new `phrase_of_day`, saves both to `user_settings`, and sets `weekCompleteInfo`. HomeScreen shows a modal from `weekCompleteInfo`; `dismissWeekComplete` clears it.
 
 ### Database: expo-sqlite v13+ async API
 
@@ -67,22 +76,26 @@ When `patchSettings({ api_key })` is called with a non-empty key and no cards ex
 | `flashcard_reviews` | Batch summaries (week_number, topic, cards_known, cards_unknown) |
 | `badges` | Unlocked badge keys + timestamps |
 | `weekly_checkins` | Sunday check-in answers + AI response |
-| `user_settings` | Single row (`id=1`) — all app settings including `api_key`, `last_batch_date` |
+| `user_settings` | Single row (`id=1`) — all app settings including `api_key`, `last_batch_date`, `cards_flipped`, `resource_title`, `resource_subtitle`, `resource_url` |
 | `flashcard_archive` | All flashcards from all weeks, permanent vocabulary library |
 
 `flashcard_archive` columns: `id, week_number, topic, arabic_script, transliteration, english_meaning, example_situation, status ('known'|'unknown'), created_at`.
 
-`createTables` also runs `ALTER TABLE` migrations (wrapped in try/catch) for columns added after initial release: `api_key`, `last_batch_date`, `flashcard_reviews.week_number`.
+`createTables` also runs `ALTER TABLE` migrations (wrapped in try/catch) for columns added after initial release: `api_key`, `last_batch_date`, `flashcard_reviews.week_number`, `cards_flipped`, `resource_title`, `resource_subtitle`, `resource_url`.
+
+New db functions added: `getFlashcardReviewForWeek(weekNumber)` → `FlashcardReview | null`, `getKnownCardsForWeek(weekNumber)` → `FlashcardArchiveEntry[]`, `deleteArchiveCardsForWeek(weekNumber)` → used by `importWeeklyCards` to replace cards on re-import.
 
 Dates stored as `YYYY-MM-DD` strings; pillars stored as comma-separated strings (e.g. `"flashcards,speaking"`).
 
 ### AI integration
 
-`src/lib/api.ts` — non-streaming `messages.create` to `claude-sonnet-4-6`. **API key is stored at runtime in `user_settings.api_key`** (entered via the Settings screen) — not in `.env`. Each exported function takes `apiKey: string` as a parameter; a new Anthropic client is created per call.
+`src/lib/api.ts` still exists but AI features are no longer called from the main app flows:
 
-Functions: `generateFlashcards(topic, apiKey)` → `FlashCard[]`, `generatePhraseOfDay(apiKey)` → `PhraseOfDay`, `generateCheckInResponse(answers, apiKey)` → string. Each retries up to 3 times and strips markdown fences before `JSON.parse`.
+- Flashcard generation is replaced by manual JSON import (see above).
+- Check-in no longer calls `generateCheckInResponse` — `saveCheckIn` is called with an empty string for `aiResponse` and the modal shows "Check-in saved!" after submit.
+- `phrase_of_day` in `user_settings` is now set by the end-of-week logic (a known card picked at random), not by an API call. HomeScreen reads `settings.phrase_of_day` (JSON string) first, then falls back to a card from `currentWeekCards`.
 
-Phrase of the day is cached in `user_settings.phrase_of_day` + `phrase_of_day_date` (only one API call per calendar day).
+The API key field in Settings is still present but is only needed if AI features are re-enabled.
 
 ### Navigation: custom BottomNav
 
@@ -110,9 +123,19 @@ Dark mode is stored in `user_settings.dark_mode` (`'light'|'dark'|'system'`). Th
 - `src/components/animated-icon.web.tsx` — CSS-based animation
 - `src/hooks/use-color-scheme.web.ts` — hydration-safe SSR version
 
+### HomeScreen quick-launch cards
+
+The bottom of the dashboard has three quick-launch cards that use `Linking.openURL`:
+
+1. **Duolingo** — deep-links to `duolingo://`, falls back to `https://www.duolingo.com`
+2. **LingQ** — deep-links to `lingq://`, falls back to `https://www.lingq.com`
+3. **Weekly Resource** — opens `settings.resource_url` directly; title and subtitle come from `settings.resource_title` / `settings.resource_subtitle`
+
+The Weekly Resource card is editable from the Settings screen (WEEKLY RESOURCE section with title, subtitle, and URL inputs).
+
 ### Image assets
 
-Untracked image files at repo root: `desertbackgroud.png`, `guyoncamelsprite.png`, `arabicappmockupimage.png`. Animation frames in `GUYONCAMELANIMATION/` (camelanimation.png through camelanimation7.png). These are not yet imported anywhere — placeholder for a future hero/animation feature. The hero section in `HomeScreen.tsx` has a `TODO` comment showing exactly where to wire in an `ImageBackground`.
+Untracked image files at repo root: `desertbackgroud.png`, `guyoncamelsprite.png`, `arabicappmockupimage.png`. Animation frames in `GUYONCAMELANIMATION/` (camelanimation.png through camelanimation7.png). The desert background and camel sprite are imported and rendered in the HomeScreen hero section. There are no Reanimated animations — the background is a static `Image` and the camel sprite is positioned absolutely.
 
 ### XP and badge logic
 

@@ -99,6 +99,10 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
     `ALTER TABLE user_settings ADD COLUMN api_key TEXT DEFAULT '';`,
     `ALTER TABLE user_settings ADD COLUMN last_batch_date TEXT;`,
     `ALTER TABLE flashcard_reviews ADD COLUMN week_number INTEGER NOT NULL DEFAULT 0;`,
+    `ALTER TABLE user_settings ADD COLUMN cards_flipped INTEGER DEFAULT 0;`,
+    `ALTER TABLE user_settings ADD COLUMN resource_title TEXT DEFAULT 'This Week';`,
+    `ALTER TABLE user_settings ADD COLUMN resource_subtitle TEXT DEFAULT 'Learn Arabic with Maha';`,
+    `ALTER TABLE user_settings ADD COLUMN resource_url TEXT DEFAULT 'https://www.youtube.com/@LearnArabicwithMaha';`,
   ]) {
     try { await db.execAsync(col); } catch (_) { /* column already exists */ }
   }
@@ -246,6 +250,10 @@ export async function getSettings(): Promise<UserSettings> {
     phrase_of_day_date: row.phrase_of_day_date,
     favorite_resource_ids: row.favorite_resource_ids,
     api_key: row.api_key ?? '',
+    cards_flipped: (row.cards_flipped as 0 | 1) ?? 0,
+    resource_title: row.resource_title ?? 'This Week',
+    resource_subtitle: row.resource_subtitle ?? 'Learn Arabic with Maha',
+    resource_url: row.resource_url ?? 'https://www.youtube.com/@LearnArabicwithMaha',
   };
 }
 
@@ -306,6 +314,29 @@ export async function markArchiveCard(
     `UPDATE flashcard_archive SET status = ? WHERE id = ?`,
     status, id
   );
+}
+
+export async function getFlashcardReviewForWeek(weekNumber: number): Promise<FlashcardReview | null> {
+  const db = await getDb();
+  return (
+    (await db.getFirstAsync<FlashcardReview>(
+      `SELECT * FROM flashcard_reviews WHERE week_number = ? LIMIT 1`,
+      weekNumber
+    )) ?? null
+  );
+}
+
+export async function getKnownCardsForWeek(weekNumber: number): Promise<FlashcardArchiveEntry[]> {
+  const db = await getDb();
+  return db.getAllAsync<FlashcardArchiveEntry>(
+    `SELECT * FROM flashcard_archive WHERE week_number = ? AND status = 'known'`,
+    weekNumber
+  );
+}
+
+export async function deleteArchiveCardsForWeek(weekNumber: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`DELETE FROM flashcard_archive WHERE week_number = ?`, weekNumber);
 }
 
 export async function getMostUnknownTopic(): Promise<string | null> {

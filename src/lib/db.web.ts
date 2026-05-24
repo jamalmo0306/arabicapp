@@ -25,6 +25,10 @@ const DEFAULT_SETTINGS: UserSettings = {
   phrase_of_day_date: null,
   favorite_resource_ids: '',
   api_key: '',
+  cards_flipped: 0 as 0 | 1,
+  resource_title: 'This Week',
+  resource_subtitle: 'Learn Arabic with Maha',
+  resource_url: 'https://www.youtube.com/@LearnArabicwithMaha',
 };
 
 export async function initDb(): Promise<void> {}
@@ -52,4 +56,7 @@ export async function insertArchiveCards(_weekNumber: number, _topic: string, _c
 export async function getArchiveCardsForWeek(_weekNumber: number): Promise<FlashcardArchiveEntry[]> { return []; }
 export async function getAllArchiveWeeks(): Promise<{ week_number: number; topic: string; count: number }[]> { return []; }
 export async function markArchiveCard(_id: number, _status: 'known' | 'unknown'): Promise<void> {}
+export async function getFlashcardReviewForWeek(_weekNumber: number): Promise<FlashcardReview | null> { return null; }
+export async function getKnownCardsForWeek(_weekNumber: number): Promise<FlashcardArchiveEntry[]> { return []; }
+export async function deleteArchiveCardsForWeek(_weekNumber: number): Promise<void> {}
 export async function getMostUnknownTopic(): Promise<string | null> { return null; }

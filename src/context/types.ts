@@ -71,6 +71,10 @@ export interface UserSettings {
   phrase_of_day_date: string | null; // YYYY-MM-DD
   favorite_resource_ids: string; // comma-separated IDs
   api_key: string;
+  cards_flipped: 0 | 1; // 1 = Arabic on front
+  resource_title: string;
+  resource_subtitle: string;
+  resource_url: string;
 }
 
 export interface FlashCard {
@@ -110,6 +114,13 @@ export interface BadgeDefinition {
   emoji: string;
   name: string;
   description: string;
+}
+
+export interface RawImportCard {
+  english: string;
+  arabic: string;
+  transliteration: string;
+  situation: string;
 }
 
 export interface ResourceItem {

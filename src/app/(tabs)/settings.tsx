@@ -48,6 +48,21 @@ export default function SettingsScreen() {
   const [apiKeyDraft, setApiKeyDraft] = useState(settings.api_key);
   const [apiSaved,    setApiSaved]    = useState(false);
 
+  const [resourceTitle,    setResourceTitle]    = useState(settings.resource_title);
+  const [resourceSubtitle, setResourceSubtitle] = useState(settings.resource_subtitle);
+  const [resourceUrl,      setResourceUrl]      = useState(settings.resource_url);
+  const [resourceSaved,    setResourceSaved]    = useState(false);
+
+  async function saveResource() {
+    await patchSettings({
+      resource_title:    resourceTitle.trim()    || 'This Week',
+      resource_subtitle: resourceSubtitle.trim() || '',
+      resource_url:      resourceUrl.trim(),
+    });
+    setResourceSaved(true);
+    setTimeout(() => setResourceSaved(false), 2000);
+  }
+
   async function setDarkMode(mode: UserSettings['dark_mode']) {
     await patchSettings({ dark_mode: mode });
   }
@@ -164,6 +179,44 @@ export default function SettingsScreen() {
               <Text style={s.helpLink}>console.anthropic.com</Text>
               {' '}— needed for flashcards &amp; AI coach.
             </Text>
+          </View>
+
+          {/* ── WEEKLY RESOURCE ── */}
+          <View style={s.card}>
+            <Text style={s.sectionLabel}>WEEKLY RESOURCE</Text>
+
+            <TextInput
+              value={resourceTitle}
+              onChangeText={setResourceTitle}
+              placeholder="Title"
+              placeholderTextColor="rgba(207,196,174,0.5)"
+              autoCorrect={false}
+              style={s.apiInput}
+            />
+            <TextInput
+              value={resourceSubtitle}
+              onChangeText={setResourceSubtitle}
+              placeholder="Subtitle"
+              placeholderTextColor="rgba(207,196,174,0.5)"
+              autoCorrect={false}
+              style={s.apiInput}
+            />
+            <TextInput
+              value={resourceUrl}
+              onChangeText={setResourceUrl}
+              placeholder="https://…"
+              placeholderTextColor="rgba(207,196,174,0.5)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              style={s.apiInput}
+            />
+
+            <Pressable onPress={saveResource} style={s.apiSaveBtn}>
+              <Text style={s.apiSaveBtnText}>
+                {resourceSaved ? '✓ Saved' : 'Save Resource'}
+              </Text>
+            </Pressable>
           </View>
 
           {/* ── TOOLS ── */}

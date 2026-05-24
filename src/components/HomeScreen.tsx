@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
   Image,
+  Linking,
+  Modal,
+  Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -10,20 +13,19 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import Animated, {
-  cancelAnimation,
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, Stack } from 'expo-router';
 import { useAppContext } from '@/context/app-context';
 import { PILLARS } from '@/lib/xp';
-import type { PillarKey } from '@/context/types';
+import type { PillarKey, PhraseOfDay } from '@/context/types';
+
+
+function getMilestone(week: number): string {
+  if (week <= 3) return 'Learn 10 phrases';
+  if (week <= 6) return 'Complete first tutor session';
+  if (week <= 9) return 'Watch one scene without subtitles';
+  return 'Hold a 5 minute conversation';
+}
 
 // Static width for StyleSheet-time calculations only
 const { width } = Dimensions.get('window');
@@ -100,17 +102,29 @@ function ProgressCard({ icon, title, value, suffix, subtitle, percent, dots, car
 // ── HomeScreen ─────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
   const { width: dynWidth } = useWindowDimensions();
-  const { streak, xpTotal, currentWeekCards, logSession, generatingBatch } = useAppContext();
+  const {
+    streak,
+    xpTotal,
+    currentWeekCards,
+    logSession,
+    settings,
+    weekCompleteInfo,
+    dismissWeekComplete,
+  } = useAppContext();
 
   const [checkedPillars, setCheckedPillars] = useState<Set<PillarKey>>(new Set());
   const [saving, setSaving] = useState(false);
   const [justLogged, setJustLogged] = useState(false);
 
-  // Pick a consistent phrase of the day from this week's cards
-  const phraseCard = useMemo(() => {
+  // Phrase of the day: read from persisted settings first, fall back to current week cards
+  const phraseCard = useMemo<PhraseOfDay | null>(() => {
+    if (settings.phrase_of_day) {
+      try { return JSON.parse(settings.phrase_of_day) as PhraseOfDay; } catch { /* fall through */ }
+    }
     if (!currentWeekCards.length) return null;
-    return currentWeekCards[new Date().getDate() % currentWeekCards.length];
-  }, [currentWeekCards]);
+    const c = currentWeekCards[new Date().getDate() % currentWeekCards.length];
+    return { arabic_script: c.arabic_script, transliteration: c.transliteration, english_meaning: c.english_meaning };
+  }, [settings.phrase_of_day, currentWeekCards]);
 
   function togglePillar(key: PillarKey) {
     setCheckedPillars(prev => {
@@ -133,66 +147,7 @@ export default function HomeScreen() {
     }
   }
 
-  // Camel: scale size with screen width so it grows with the background image.
-  // Position at a fixed % of the hero height — same relative spot every resize.
   const camelSize = dynWidth * 0.62;
-
-  // ── Animation shared values ────────────────────────────────────────────────
-  const camelY   = useSharedValue(0);
-  const camelRot = useSharedValue(0);
-  const bgX      = useSharedValue(0);
-
-  // Camel: vertical bob + rotation sway
-  const camelAnimStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateY: camelY.value },
-      { rotate: `${camelRot.value}deg` },
-    ],
-  }));
-
-  // Background: horizontal pan
-  const bgPanStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: bgX.value }],
-  }));
-
-  useEffect(() => {
-    // Bob: 0 → -10 → 0, 1.2 s cycle, infinite
-    camelY.value = withRepeat(
-      withSequence(
-        withTiming(-10, { duration: 600 }),
-        withTiming(0,   { duration: 600 }),
-      ),
-      -1,
-      false,
-    );
-
-    // Sway: -2° → +2°, 1.2 s cycle, infinite
-    camelRot.value = withRepeat(
-      withSequence(
-        withTiming(-2, { duration: 600 }),
-        withTiming(2,  { duration: 600 }),
-      ),
-      -1,
-      false,
-    );
-
-    // Pan: 0 → -screenWidth over 14 s, loop (instant reset via duration-0 step)
-    bgX.value = withRepeat(
-      withSequence(
-        withTiming(-dynWidth, { duration: 14000, easing: Easing.linear }),
-        withTiming(0,          { duration: 0 }),
-      ),
-      -1,
-      false,
-    );
-
-    return () => {
-      cancelAnimation(camelY);
-      cancelAnimation(camelRot);
-      cancelAnimation(bgX);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return (
     <>
@@ -263,8 +218,6 @@ export default function HomeScreen() {
                   <Text style={s.translitText}>{phraseCard.transliteration}</Text>
                   <Text style={s.meaningText}>{phraseCard.english_meaning}</Text>
                 </>
-              ) : generatingBatch ? (
-                <Text style={s.meaningText}>Generating phrases…</Text>
               ) : (
                 <>
                   <Text style={s.arabicText}>كيف حالك؟</Text>
@@ -279,19 +232,19 @@ export default function HomeScreen() {
           {/* ── HERO ── */}
           <View style={s.hero}>
 
-            {/* Layer 1 — panning desert background (2× screen width) */}
-            <Animated.View style={[s.heroBg, bgPanStyle]}>
+            {/* Layer 1 — desert background */}
+            <View style={s.heroBg}>
               <Image
                 source={require('../../desertbackgroud.png')}
-                style={{ width: dynWidth * 2, height: 760 }}
+                style={{ width: dynWidth, height: 760 }}
                 resizeMode="cover"
               />
-            </Animated.View>
+            </View>
 
-            {/* Layer 2 — camel: bobs & sways, fixed in the hero (does NOT pan) */}
-            <Animated.Image
+            {/* Layer 2 — camel */}
+            <Image
               source={require('../../guyoncamelsprite.png')}
-              style={[s.camelSprite, { width: camelSize, height: camelSize }, camelAnimStyle]}
+              style={[s.camelSprite, { width: camelSize, height: camelSize }]}
               resizeMode="contain"
             />
 
@@ -344,7 +297,7 @@ export default function HomeScreen() {
                 <Text style={s.progressTitle}>🏆 Next Milestone</Text>
                 <Text style={s.lockIcon}>🔒</Text>
               </View>
-              <Text style={s.milestoneMain}>Learn 10 phrases</Text>
+              <Text style={s.milestoneMain}>{getMilestone(settings.current_week)}</Text>
               <Text style={s.milestoneSub}>+25 XP</Text>
               <View style={s.milestoneBottom}>
                 <View style={s.progressTrackDark}>
@@ -358,6 +311,47 @@ export default function HomeScreen() {
                 <Text style={s.milestoneCount}>{currentWeekCards.filter(c => c.status === 'known').length} / {MILESTONE_GOAL}</Text>
               </View>
             </View>
+          </View>
+
+          {/* ── QUICK LAUNCH ── */}
+          <View style={s.quickLaunchRow}>
+            <TouchableOpacity
+              activeOpacity={0.82}
+              style={s.quickCard}
+              onPress={() =>
+                Linking.canOpenURL('duolingo://').then(supported =>
+                  Linking.openURL(supported ? 'duolingo://' : 'https://www.duolingo.com')
+                )
+              }
+            >
+              <Text style={s.quickEmoji}>🦉</Text>
+              <Text style={s.quickTitle}>Duolingo</Text>
+              <Text style={s.quickSub}>Continue your streak</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.82}
+              style={s.quickCard}
+              onPress={() =>
+                Linking.canOpenURL('lingq://').then(supported =>
+                  Linking.openURL(supported ? 'lingq://' : 'https://www.lingq.com')
+                )
+              }
+            >
+              <Text style={s.quickEmoji}>📖</Text>
+              <Text style={s.quickTitle}>LingQ</Text>
+              <Text style={s.quickSub}>Reading practice</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.82}
+              style={s.quickCard}
+              onPress={() => Linking.openURL(settings.resource_url)}
+            >
+              <Text style={s.quickEmoji}>🎬</Text>
+              <Text style={s.quickTitle}>{settings.resource_title}</Text>
+              <Text style={s.quickSub}>{settings.resource_subtitle}</Text>
+            </TouchableOpacity>
           </View>
 
         </ScrollView>
@@ -376,6 +370,29 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
       </SafeAreaView>
+
+      {/* Week complete modal */}
+      <Modal
+        visible={!!weekCompleteInfo}
+        transparent
+        animationType="fade"
+        onRequestClose={dismissWeekComplete}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.modalCard}>
+            <Text style={s.modalEmoji}>🌿</Text>
+            <Text style={s.modalTitle}>
+              Week {weekCompleteInfo?.completedWeek} complete!
+            </Text>
+            <Text style={s.modalBody}>
+              Your cards have been archived.{'\n'}Ready for Week {(weekCompleteInfo?.completedWeek ?? 0) + 1}?
+            </Text>
+            <Pressable onPress={dismissWeekComplete} style={s.modalBtn}>
+              <Text style={s.modalBtnText}>Let's go →</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -619,5 +636,54 @@ const s = StyleSheet.create({
   },
   progressFillDark: { height: '100%', backgroundColor: COLORS.olive, borderRadius: 20 },
   milestoneCount: { color: '#F6EBD1', fontSize: 15, fontWeight: '700', marginLeft: 14 },
+
+  // Quick-launch cards
+  quickLaunchRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  quickCard: {
+    flex: 1,
+    backgroundColor: COLORS.blackGlass,
+    borderRadius: 16,
+    padding: 14,
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(218,168,64,0.18)',
+  },
+  quickEmoji: { fontSize: 28 },
+  quickTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  quickSub:   { color: COLORS.mutedLight, fontSize: 11, textAlign: 'center', lineHeight: 15 },
+
+  // Week complete modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  modalCard: {
+    backgroundColor: '#FAF6ED',
+    borderRadius: 20,
+    padding: 28,
+    alignItems: 'center',
+    gap: 10,
+    width: '100%',
+    maxWidth: 340,
+  },
+  modalEmoji: { fontSize: 52, textAlign: 'center' },
+  modalTitle: { fontSize: 22, fontWeight: '700', color: COLORS.bg, textAlign: 'center' },
+  modalBody: { fontSize: 15, color: '#5A4A35', textAlign: 'center', lineHeight: 22 },
+  modalBtn: {
+    marginTop: 8,
+    backgroundColor: COLORS.bg,
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  modalBtnText: { color: '#FAF6ED', fontWeight: '700', fontSize: 16 },
 
 });

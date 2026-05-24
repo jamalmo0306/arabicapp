@@ -2,348 +2,740 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
+  Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { FlipCard } from '@/components/ui/flip-card';
 import { Spacing } from '@/constants/theme';
 import { useAppContext } from '@/context/app-context';
-import type { FlashcardArchiveEntry } from '@/context/types';
+import type { FlashcardArchiveEntry, RawImportCard } from '@/context/types';
 import { getArchiveCardsForWeek } from '@/lib/db';
-import { useTheme } from '@/hooks/use-theme';
+
+// ── Palette (matches HomeScreen dashboard) ────────────────────────────────────
+const C = {
+  sand:       '#CBB77C',
+  bg:         '#15150F',
+  cardLight:  'rgba(244, 218, 156, 0.88)',
+  cardDark:   'rgba(14, 15, 15, 0.88)',
+  borderGold: 'rgba(218, 168, 64, 0.28)',
+  borderGoldBright: 'rgba(247, 198, 83, 0.55)',
+  textDark:   '#2C251C',
+  textLight:  '#F7E8C0',
+  mutedDark:  '#6B5B44',
+  mutedLight: '#CFC4AE',
+  olive:      '#9BC76D',
+  gold:       '#F7C653',
+};
+
+const AGAIN_COLOR = '#C0392B';
+const HARD_COLOR  = '#E67E22';
+const GOOD_COLOR  = '#27AE60';
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
 
 export default function FlashcardsScreen() {
-  const colors = useTheme();
   const params = useLocalSearchParams<{ reviewWeek?: string }>();
   const reviewWeek = params.reviewWeek ? parseInt(params.reviewWeek, 10) : null;
 
   const {
     settings,
     currentWeekCards,
-    generatingBatch,
     isDbReady,
     markCard,
-    triggerWeeklyGeneration,
     saveFlashcardBatch,
+    importWeeklyCards,
+    patchSettings,
   } = useAppContext();
 
-  const [cards, setCards] = useState<FlashcardArchiveEntry[]>([]);
-  const [cardIndex, setCardIndex] = useState(0);
-  const [showTranslit, setShowTranslit] = useState(true);
+  const arabicFirst = settings.cards_flipped === 1;
+
+  const [allCards, setAllCards] = useState<FlashcardArchiveEntry[]>([]);
+  const [queue, setQueue] = useState<FlashcardArchiveEntry[]>([]);
+  const [goodIds, setGoodIds] = useState<Set<number>>(new Set());
+  const [sessionCardIndex, setSessionCardIndex] = useState(0);
   const [sessionDone, setSessionDone] = useState(false);
 
-  // When reviewing a past week, load those cards; otherwise use current week
+  // Import modal
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState('');
+  const [importSuccess, setImportSuccess] = useState('');
+  const [importing, setImporting] = useState(false);
+
   useEffect(() => {
     if (!isDbReady) return;
     if (reviewWeek !== null) {
-      getArchiveCardsForWeek(reviewWeek).then(setCards);
+      getArchiveCardsForWeek(reviewWeek).then(cards => {
+        setAllCards(cards);
+        setQueue([...cards]);
+        setGoodIds(new Set());
+        setSessionCardIndex(0);
+        setSessionDone(false);
+      });
     } else {
-      setCards(currentWeekCards);
-      setCardIndex(0);
+      setAllCards(currentWeekCards);
+      setQueue([...currentWeekCards]);
+      setGoodIds(new Set());
+      setSessionCardIndex(0);
       setSessionDone(false);
     }
   }, [isDbReady, reviewWeek, currentWeekCards]);
 
-  // Trigger generation if no cards and key is set
-  useEffect(() => {
-    const key = settings.api_key || process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '';
-    if (isDbReady && !reviewWeek && key && currentWeekCards.length === 0 && !generatingBatch) {
-      triggerWeeklyGeneration();
-    }
-  }, [isDbReady, settings.api_key]);
+  function rate(rating: 'again' | 'hard' | 'good') {
+    const current = queue[0];
+    if (!current) return;
+    const rest = queue.slice(1);
 
-  function handleMark(status: 'known' | 'unknown') {
-    const card = cards[cardIndex];
-    markCard(card.id, status);
-    if (cardIndex < cards.length - 1) {
-      setCardIndex(i => i + 1);
+    if (rating === 'good') {
+      markCard(current.id, 'known');
+      const newGood = new Set(goodIds);
+      newGood.add(current.id);
+      setGoodIds(newGood);
+      if (rest.length === 0) { endSession(newGood); return; }
+      setQueue(rest);
+    } else if (rating === 'hard') {
+      setQueue([...rest, current]);
     } else {
-      finishSession();
+      const at = Math.min(2, rest.length);
+      const next = [...rest];
+      next.splice(at, 0, current);
+      setQueue(next);
     }
+    setSessionCardIndex(i => i + 1);
   }
 
-  async function finishSession() {
+  async function endSession(finalGood: Set<number>) {
     setSessionDone(true);
     if (!reviewWeek) {
-      const knownCount = cards.filter((_, i) => i < cardIndex).length; // approximate
       await saveFlashcardBatch({
         week_number: settings.current_week,
-        topic: cards[0]?.topic ?? '',
+        topic: allCards[0]?.topic ?? '',
         batch_date: new Date().toISOString().slice(0, 10),
-        cards_known: cards.filter(c => c.status === 'known').length,
-        cards_unknown: cards.filter(c => c.status === 'unknown').length,
+        cards_known: finalGood.size,
+        cards_unknown: allCards.length - finalGood.size,
       });
     }
   }
 
   function restart() {
-    setCardIndex(0);
+    setQueue([...allCards]);
+    setGoodIds(new Set());
+    setSessionCardIndex(0);
     setSessionDone(false);
   }
 
-  // ── No API key ────────────────────────────────────────────────────────────
+  function toggleOrientation() {
+    patchSettings({ cards_flipped: arabicFirst ? 0 : 1 });
+  }
+
+  async function handleLoadCards() {
+    setImportError('');
+    setImportSuccess('');
+    setImporting(true);
+    try {
+      const parsed = JSON.parse(importText.trim());
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        setImportError('JSON must be a non-empty array.');
+        setImporting(false);
+        return;
+      }
+      for (let i = 0; i < parsed.length; i++) {
+        const item = parsed[i];
+        const missing = ['english', 'arabic', 'transliteration', 'situation'].filter(
+          f => !item[f] || typeof item[f] !== 'string'
+        );
+        if (missing.length > 0) {
+          setImportError(`Item ${i + 1} is missing: ${missing.join(', ')}`);
+          setImporting(false);
+          return;
+        }
+      }
+      await importWeeklyCards(settings.current_week, parsed as RawImportCard[]);
+      setImportSuccess(`${parsed.length} cards loaded for Week ${settings.current_week}`);
+      setImportText('');
+      setTimeout(() => { setShowImport(false); setImportSuccess(''); }, 1500);
+    } catch {
+      setImportError('Invalid JSON — check your input and try again.');
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function openImport() {
+    setImportText(''); setImportError(''); setImportSuccess('');
+    setShowImport(true);
+  }
+
+  // ── Guards ────────────────────────────────────────────────────────────────
 
   if (!isDbReady) {
     return (
-      <ThemedView style={[styles.root, styles.center, { backgroundColor: colors.cream }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </ThemedView>
+      <View style={[s.root, s.center]}>
+        <ActivityIndicator size="large" color={C.olive} />
+      </View>
     );
   }
 
-  const effectiveKey = settings.api_key || process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '';
-  if (!effectiveKey && !reviewWeek) {
+  if (reviewWeek !== null && allCards.length === 0) {
     return (
-      <ThemedView style={[styles.root, styles.center, { backgroundColor: colors.cream }]}>
-        <SafeAreaView style={[styles.safe, styles.center]}>
-          <View style={styles.centeredCard}>
-            <ThemedText style={styles.bigEmoji}>🔑</ThemedText>
-            <ThemedText type="subtitle" style={{ color: colors.primary, textAlign: 'center' }}>
-              API key needed
-            </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary" style={{ textAlign: 'center' }}>
-              Add your Anthropic API key in Settings to generate your weekly phrases.
-            </ThemedText>
-            <Pressable
-              onPress={() => router.push('/(tabs)/settings')}
-              style={[styles.actionBtn, { backgroundColor: colors.primary }]}>
-              <ThemedText style={styles.actionBtnText}>Go to Settings</ThemedText>
+      <View style={s.root}>
+        <SafeAreaView style={[s.safe, s.center]}>
+          <View style={s.centeredCard}>
+            <Text style={s.bigEmoji}>📭</Text>
+            <Text style={s.emptyTitle}>No cards found</Text>
+            <Pressable onPress={() => router.back()} style={s.actionBtnPrimary}>
+              <Text style={s.actionBtnText}>← Go back</Text>
             </Pressable>
           </View>
         </SafeAreaView>
-      </ThemedView>
+      </View>
     );
   }
 
-  // ── Generating ────────────────────────────────────────────────────────────
-
-  if (generatingBatch || (cards.length === 0 && !reviewWeek && effectiveKey)) {
+  if (!reviewWeek && allCards.length === 0) {
     return (
-      <ThemedView style={[styles.root, styles.center, { backgroundColor: colors.cream }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <ThemedText type="small" themeColor="textSecondary" style={{ marginTop: Spacing.three }}>
-          Generating Week {settings.current_week} phrases…
-        </ThemedText>
-      </ThemedView>
-    );
-  }
-
-  // ── Empty review week ─────────────────────────────────────────────────────
-
-  if (reviewWeek !== null && cards.length === 0) {
-    return (
-      <ThemedView style={[styles.root, styles.center, { backgroundColor: colors.cream }]}>
-        <SafeAreaView style={[styles.safe, styles.center]}>
-          <View style={styles.centeredCard}>
-            <ThemedText style={styles.bigEmoji}>📭</ThemedText>
-            <ThemedText type="subtitle" style={{ color: colors.primary }}>No cards found</ThemedText>
-            <Pressable onPress={() => router.back()} style={[styles.actionBtn, { backgroundColor: colors.primary }]}>
-              <ThemedText style={styles.actionBtnText}>← Go back</ThemedText>
-            </Pressable>
+      <View style={s.root}>
+        <SafeAreaView style={s.safe}>
+          <TopBar
+            label={`Week ${settings.current_week}`}
+            arabicFirst={arabicFirst}
+            onToggle={toggleOrientation}
+            onImport={openImport}
+          />
+          <View style={[s.emptyFlex, s.center]}>
+            <View style={s.centeredCard}>
+              <Text style={s.bigEmoji}>📋</Text>
+              <Text style={s.emptyTitle}>No cards yet</Text>
+              <Text style={s.emptySub}>
+                Tap "Import +" to paste your weekly phrases and start studying.
+              </Text>
+            </View>
           </View>
         </SafeAreaView>
-      </ThemedView>
+        <ImportModal
+          visible={showImport}
+          text={importText}
+          error={importError}
+          success={importSuccess}
+          loading={importing}
+          onChangeText={setImportText}
+          onLoad={handleLoadCards}
+          onCancel={() => setShowImport(false)}
+        />
+      </View>
     );
   }
 
-  // ── Session done (summary) ────────────────────────────────────────────────
+  // ── Session done ──────────────────────────────────────────────────────────
 
   if (sessionDone) {
-    const knownCount = cards.filter(c => c.status === 'known').length;
-    const unknownCount = cards.length - knownCount;
     return (
-      <ThemedView style={[styles.root, styles.center, { backgroundColor: colors.cream }]}>
-        <SafeAreaView style={[styles.safe, styles.center]}>
-          <View style={styles.centeredCard}>
-            <ThemedText style={styles.bigEmoji}>🌿</ThemedText>
-            <ThemedText type="subtitle" style={{ color: colors.primary }}>
-              {reviewWeek ? 'Review done!' : `Week ${settings.current_week} done!`}
-            </ThemedText>
-            <ThemedText themeColor="textSecondary">
-              {knownCount} known · {unknownCount} still learning
-            </ThemedText>
-            <ThemedText type="small" style={{ color: colors.accent }}>+5 XP earned</ThemedText>
-            {reviewWeek ? (
-              <Pressable onPress={() => router.back()} style={[styles.actionBtn, { backgroundColor: colors.primary }]}>
-                <ThemedText style={styles.actionBtnText}>← Back to Archive</ThemedText>
+      <View style={s.root}>
+        <SafeAreaView style={[s.safe, s.center]}>
+          <View style={s.completionCard}>
+            <Text style={s.bigEmoji}>🌿</Text>
+            <Text style={s.completionArabic}>أحسنت!</Text>
+            <Text style={s.completionTitle}>
+              {reviewWeek ? 'Review done!' : 'Session complete!'}
+            </Text>
+            <Text style={s.completionSub}>
+              {goodIds.size} / {allCards.length} mastered this session
+            </Text>
+            <Text style={s.completionHint}>Keep it up — you're building real Arabic</Text>
+            <Pressable onPress={restart} style={[s.actionBtnPrimary, { marginTop: Spacing.two }]}>
+              <Text style={s.actionBtnText}>Review Again</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => reviewWeek ? router.back() : router.replace('/')}
+              style={s.actionBtnSecondary}>
+              <Text style={[s.actionBtnText, { color: C.textDark }]}>Done</Text>
+            </Pressable>
+            {!reviewWeek && (
+              <Pressable onPress={() => router.push('/archive')}>
+                <Text style={s.archiveLink}>Past Weeks →</Text>
               </Pressable>
-            ) : (
-              <>
-                <Pressable onPress={restart} style={[styles.actionBtn, { backgroundColor: colors.primary }]}>
-                  <ThemedText style={styles.actionBtnText}>Study again</ThemedText>
-                </Pressable>
-                <Pressable
-                  onPress={() => router.push('/archive')}
-                  style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.primary, borderWidth: 1.5 }]}>
-                  <ThemedText style={[styles.actionBtnText, { color: colors.primary }]}>
-                    Past Weeks →
-                  </ThemedText>
-                </Pressable>
-              </>
             )}
           </View>
         </SafeAreaView>
-      </ThemedView>
+      </View>
     );
   }
 
   // ── Study ─────────────────────────────────────────────────────────────────
 
-  const card = cards[cardIndex];
-  const topic = cards[0]?.topic ?? '';
+  const currentCard = queue[0];
+  if (!currentCard) return null;
 
-  if (!card) return null;
+  const topic = allCards[0]?.topic ?? '';
+  const mastered = goodIds.size;
+  const total = allCards.length;
+
+  const englishFace = (
+    <View style={s.faceContainer}>
+      <Text style={s.englishMain}>{currentCard.english_meaning}</Text>
+      <Text style={s.situationText}>{currentCard.example_situation}</Text>
+      <Text style={s.flipHint}>Tap to flip</Text>
+    </View>
+  );
+
+  const arabicFace = (
+    <View style={s.faceContainer}>
+      <Text style={s.backEnglish}>{currentCard.english_meaning}</Text>
+      <Text style={s.arabicMain}>{currentCard.arabic_script}</Text>
+      <Text style={s.translitText}>{currentCard.transliteration}</Text>
+    </View>
+  );
 
   return (
-    <ThemedView style={[styles.root, { backgroundColor: colors.cream }]}>
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.studyContainer}>
-          {/* Header row */}
-          <View style={styles.headerRow}>
-            <ThemedText type="small" themeColor="textSecondary">
-              {reviewWeek ? `Week ${reviewWeek} — ` : `Week ${settings.current_week} — `}{topic}
-            </ThemedText>
-            {!reviewWeek && (
-              <Pressable onPress={() => router.push('/archive')}>
-                <ThemedText type="small" style={{ color: colors.accent }}>Past Weeks →</ThemedText>
-              </Pressable>
-            )}
-          </View>
+    <View style={s.root}>
+      <SafeAreaView style={s.safe}>
+        <TopBar
+          label={reviewWeek
+            ? `Week ${reviewWeek} · ${topic}`
+            : `Week ${settings.current_week} · ${topic}`}
+          arabicFirst={arabicFirst}
+          onToggle={toggleOrientation}
+          onImport={!reviewWeek ? openImport : undefined}
+          onArchive={!reviewWeek ? () => router.push('/archive') : undefined}
+        />
 
-          {/* Progress bar */}
-          <View style={[styles.progressTrack, { backgroundColor: colors.surface }]}>
-            <View
-              style={[
-                styles.progressFill,
-                {
-                  backgroundColor: colors.primary,
-                  width: `${(cardIndex / cards.length) * 100}%`,
-                },
-              ]}
-            />
+        {/* Progress */}
+        <View style={s.progressSection}>
+          <View style={s.progressTrack}>
+            <View style={[s.progressFill, { width: `${(mastered / total) * 100}%` }]} />
           </View>
-          <ThemedText type="small" themeColor="textSecondary" style={styles.progressLabel}>
-            {cardIndex + 1} / {cards.length}
-          </ThemedText>
-
-          {/* Flip card — English front, Arabic back */}
-          <FlipCard
-            front={
-              <>
-                <ThemedText style={[styles.english, { color: colors.text }]}>
-                  {card.english_meaning}
-                </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary" style={styles.situation}>
-                  {card.example_situation}
-                </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  Tap to see Arabic
-                </ThemedText>
-              </>
-            }
-            back={
-              <>
-                <ThemedText style={[styles.arabic, { color: colors.text }]}>
-                  {card.arabic_script}
-                </ThemedText>
-                {showTranslit && (
-                  <ThemedText type="small" themeColor="textSecondary" style={styles.translit}>
-                    {card.transliteration}
-                  </ThemedText>
-                )}
-                <Pressable onPress={() => setShowTranslit(v => !v)}>
-                  <ThemedText type="small" style={{ color: colors.accent }}>
-                    {showTranslit ? 'Hide' : 'Show'} transliteration
-                  </ThemedText>
-                </Pressable>
-              </>
-            }
-          />
-
-          {/* Known / Unknown buttons */}
-          <View style={styles.markRow}>
-            <Pressable
-              onPress={() => handleMark('unknown')}
-              style={[styles.markBtn, { backgroundColor: '#C0392B' }]}>
-              <ThemedText style={styles.markBtnText}>✗ Still learning</ThemedText>
-            </Pressable>
-            <Pressable
-              onPress={() => handleMark('known')}
-              style={[styles.markBtn, { backgroundColor: colors.primary }]}>
-              <ThemedText style={styles.markBtnText}>✓ Got it</ThemedText>
-            </Pressable>
-          </View>
+          <Text style={s.progressLabel}>
+            Card {sessionCardIndex + 1} · {mastered} / {total} mastered
+          </Text>
         </View>
+
+        {/* Flip card — key resets animation on every advance */}
+        <StudyCard
+          key={`${currentCard.id}-${sessionCardIndex}`}
+          front={arabicFirst ? arabicFace : englishFace}
+          back={arabicFirst ? englishFace : arabicFace}
+          frontDark={arabicFirst}
+          onRate={rate}
+        />
       </SafeAreaView>
-    </ThemedView>
+
+      <ImportModal
+        visible={showImport}
+        text={importText}
+        error={importError}
+        success={importSuccess}
+        loading={importing}
+        onChangeText={setImportText}
+        onLoad={handleLoadCards}
+        onCancel={() => setShowImport(false)}
+      />
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1 },
+// ── TopBar ────────────────────────────────────────────────────────────────────
+
+function TopBar({
+  label,
+  arabicFirst,
+  onToggle,
+  onImport,
+  onArchive,
+}: {
+  label: string;
+  arabicFirst: boolean;
+  onToggle: () => void;
+  onImport?: () => void;
+  onArchive?: () => void;
+}) {
+  return (
+    <View style={s.topBar}>
+      <Text style={s.topBarLabel} numberOfLines={1}>{label}</Text>
+      <View style={s.topBarRight}>
+        {onArchive && (
+          <Pressable onPress={onArchive}>
+            <Text style={s.archiveLink}>Archive →</Text>
+          </Pressable>
+        )}
+        {onImport && (
+          <Pressable onPress={onImport} style={s.importBtn}>
+            <Text style={s.importBtnText}>Import +</Text>
+          </Pressable>
+        )}
+        <Pressable
+          onPress={onToggle}
+          style={[s.swapBtn, arabicFirst && s.swapBtnActive]}
+          accessibilityLabel={arabicFirst ? 'Show English first' : 'Show Arabic first'}
+        >
+          <Text style={[s.swapIcon, arabicFirst && { color: C.textLight }]}>⇄</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+// ── StudyCard ─────────────────────────────────────────────────────────────────
+
+function StudyCard({
+  front,
+  back,
+  frontDark,
+  onRate,
+}: {
+  front: React.ReactNode;
+  back: React.ReactNode;
+  frontDark: boolean;
+  onRate: (r: 'again' | 'hard' | 'good') => void;
+}) {
+  const [flipped, setFlipped] = useState(false);
+
+  const frontFaceStyle = frontDark ? s.cardFaceDark : s.cardFaceLight;
+  const backFaceStyle  = frontDark ? s.cardFaceLight : s.cardFaceDark;
+
+  return (
+    <View style={s.studyArea}>
+      <Pressable onPress={() => setFlipped(f => !f)} style={s.cardContainer}>
+        <View style={[s.cardFace, flipped ? backFaceStyle : frontFaceStyle]}>
+          {flipped ? back : front}
+        </View>
+      </Pressable>
+
+      {flipped ? (
+        <View style={s.ratingRow}>
+          <RatingBtn label="Again" sub="↺" color={AGAIN_COLOR} onPress={() => onRate('again')} />
+          <RatingBtn label="Hard"  sub="~" color={HARD_COLOR}  onPress={() => onRate('hard')} />
+          <RatingBtn label="Good"  sub="✓" color={GOOD_COLOR}  onPress={() => onRate('good')} />
+        </View>
+      ) : (
+        <Text style={s.flipPrompt}>Tap card to reveal</Text>
+      )}
+    </View>
+  );
+}
+
+// ── RatingBtn ─────────────────────────────────────────────────────────────────
+
+function RatingBtn({ label, sub, color, onPress }: {
+  label: string; sub: string; color: string; onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={[s.ratingBtn, { backgroundColor: color }]}>
+      <Text style={s.ratingBtnSub}>{sub}</Text>
+      <Text style={s.ratingBtnLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
+// ── ImportModal ───────────────────────────────────────────────────────────────
+
+function ImportModal({
+  visible, text, error, success, loading, onChangeText, onLoad, onCancel,
+}: {
+  visible: boolean; text: string; error: string; success: string; loading: boolean;
+  onChangeText: (t: string) => void; onLoad: () => void; onCancel: () => void;
+}) {
+  return (
+    <Modal visible={visible} animationType="slide" transparent presentationStyle="overFullScreen">
+      <KeyboardAvoidingView style={s.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={s.modalSheet}>
+          <Text style={s.modalTitle}>Paste Weekly Cards</Text>
+          <Text style={s.modalSub}>
+            JSON array — each item needs: english, arabic, transliteration, situation.
+          </Text>
+          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+            <TextInput
+              style={[s.jsonInput, error ? s.jsonInputError : null]}
+              multiline
+              placeholder={'[\n  {\n    "english": "How are you?",\n    "arabic": "كيف حالك؟",\n    "transliteration": "kayf ḥalak?",\n    "situation": "Greeting a friend"\n  }\n]'}
+              placeholderTextColor={C.mutedDark}
+              value={text}
+              onChangeText={onChangeText}
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+          </ScrollView>
+          {!!error   && <Text style={s.importError}>{error}</Text>}
+          {!!success && <Text style={s.importSuccess}>✓ {success}</Text>}
+          <View style={s.modalActions}>
+            <Pressable onPress={onCancel} style={s.actionBtnSecondary}>
+              <Text style={[s.actionBtnText, { color: C.textDark }]}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              onPress={onLoad}
+              disabled={loading || !text.trim()}
+              style={[s.actionBtnPrimary, (loading || !text.trim()) && { opacity: 0.45 }]}>
+              {loading
+                ? <ActivityIndicator size="small" color={C.textLight} />
+                : <Text style={s.actionBtnText}>Load Cards</Text>}
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: C.sand },
   safe: { flex: 1 },
   center: { alignItems: 'center', justifyContent: 'center' },
-  centeredCard: {
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingHorizontal: Spacing.four,
-    maxWidth: 340,
-  },
-  bigEmoji: { fontSize: 64 },
-  actionBtn: {
-    paddingHorizontal: Spacing.five,
-    paddingVertical: Spacing.three,
-    borderRadius: Spacing.three,
-    marginTop: Spacing.one,
-    minWidth: 200,
-    alignItems: 'center',
-  },
-  actionBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  studyContainer: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.three,
-    gap: Spacing.three,
-  },
-  headerRow: {
+  emptyFlex: { flex: 1 },
+
+  // Top bar
+  topBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
+    gap: 8,
+  },
+  topBarLabel: {
+    flex: 1,
+    color: C.mutedDark,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  topBarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  archiveLink: { color: C.gold, fontSize: 13, fontWeight: '700' },
+  importBtn: {
+    backgroundColor: C.bg,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  importBtnText: { color: C.textLight, fontWeight: '700', fontSize: 12 },
+  swapBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: C.cardLight,
+    borderWidth: 1,
+    borderColor: C.borderGold,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapBtnActive: { backgroundColor: C.bg },
+  swapIcon: { fontSize: 17, fontWeight: '700', color: C.textDark },
+
+  // Progress
+  progressSection: {
+    paddingHorizontal: 16,
+    gap: 6,
+    marginBottom: 8,
   },
   progressTrack: {
-    height: 4,
-    borderRadius: 2,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(44,37,28,0.18)',
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    borderRadius: 2,
+    borderRadius: 3,
+    backgroundColor: C.olive,
   },
-  progressLabel: { textAlign: 'center' },
-  english: { fontSize: 22, fontWeight: '600', textAlign: 'center' },
-  situation: { textAlign: 'center', fontStyle: 'italic' },
-  arabic: {
-    fontSize: 36,
-    fontWeight: '600',
+  progressLabel: {
+    textAlign: 'center',
+    color: C.mutedDark,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+
+  // Card
+  studyArea: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingBottom: 28,
+    gap: 16,
+  },
+  cardContainer: { flex: 1 },
+  cardFace: {
+    flex: 1,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  cardFaceLight: {
+    backgroundColor: C.cardLight,
+    borderColor: C.borderGold,
+  },
+  cardFaceDark: {
+    backgroundColor: C.cardDark,
+    borderColor: C.borderGoldBright,
+  },
+
+  // Face content
+  faceContainer: { alignItems: 'center', gap: 10, width: '100%' },
+  englishMain: {
+    color: C.textDark,
+    fontSize: 26,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 34,
+  },
+  situationText: {
+    color: C.mutedDark,
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  flipHint: {
+    color: C.mutedDark,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 8,
+    opacity: 0.7,
+  },
+  backEnglish: {
+    color: C.mutedLight,
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  arabicMain: {
+    color: C.textLight,
+    fontSize: 32,
+    fontWeight: '700',
     textAlign: 'center',
     writingDirection: 'rtl',
+    lineHeight: 50,
   },
-  translit: { fontStyle: 'italic', textAlign: 'center' },
-  markRow: {
-    flexDirection: 'row',
-    gap: Spacing.three,
-    paddingBottom: Spacing.five,
+  translitText: {
+    color: C.mutedLight,
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
-  markBtn: {
+  flipPrompt: {
+    color: C.mutedDark,
+    fontSize: 13,
+    textAlign: 'center',
+    paddingBottom: 4,
+  },
+
+  // Rating buttons
+  ratingRow: { flexDirection: 'row', gap: 10 },
+  ratingBtn: {
     flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    gap: 2,
+  },
+  ratingBtnSub:   { color: 'rgba(255,255,255,0.65)', fontSize: 12 },
+  ratingBtnLabel: { color: '#fff', fontWeight: '700', fontSize: 16 },
+
+  // Empty / loading states
+  centeredCard: {
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 32,
+    maxWidth: 340,
+  },
+  bigEmoji: { fontSize: 64, textAlign: 'center' },
+  emptyTitle: { color: C.textDark, fontSize: 22, fontWeight: '700', textAlign: 'center' },
+  emptySub:   { color: C.mutedDark, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+
+  // Completion
+  completionCard: {
+    backgroundColor: C.cardDark,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: C.borderGoldBright,
+    padding: 28,
+    marginHorizontal: 20,
+    alignItems: 'center',
+    gap: 10,
+  },
+  completionArabic: {
+    color: C.gold,
+    fontSize: 36,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  completionTitle: { color: C.textLight, fontSize: 22, fontWeight: '700', textAlign: 'center' },
+  completionSub:   { color: C.mutedLight, fontSize: 15, textAlign: 'center' },
+  completionHint:  { color: C.gold, fontSize: 13, textAlign: 'center', marginBottom: 4 },
+
+  // Shared buttons
+  actionBtnPrimary: {
+    backgroundColor: C.bg,
+    paddingHorizontal: Spacing.five,
     paddingVertical: Spacing.three,
-    borderRadius: Spacing.three,
+    borderRadius: 12,
+    minWidth: 140,
     alignItems: 'center',
   },
-  markBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  actionBtnSecondary: {
+    backgroundColor: C.cardLight,
+    borderWidth: 1.5,
+    borderColor: C.borderGold,
+    paddingHorizontal: Spacing.five,
+    paddingVertical: Spacing.three,
+    borderRadius: 12,
+    minWidth: 140,
+    alignItems: 'center',
+  },
+  actionBtnText: { color: C.textLight, fontWeight: '700', fontSize: 15 },
+
+  // Import modal
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  modalSheet: {
+    backgroundColor: C.cardLight,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    padding: 24,
+    maxHeight: '85%',
+  },
+  modalTitle: {
+    color: C.textDark,
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  modalSub: {
+    color: C.mutedDark,
+    fontSize: 13,
+    marginBottom: 14,
+    lineHeight: 19,
+  },
+  jsonInput: {
+    minHeight: 200,
+    backgroundColor: C.sand,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: C.borderGold,
+    padding: 14,
+    fontSize: 13,
+    color: C.textDark,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    textAlignVertical: 'top',
+    marginBottom: 8,
+  },
+  jsonInputError: { borderColor: AGAIN_COLOR },
+  importError:   { color: AGAIN_COLOR, fontSize: 13, marginTop: 6 },
+  importSuccess: { color: GOOD_COLOR,  fontSize: 13, marginTop: 6 },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 14,
+  },
 });

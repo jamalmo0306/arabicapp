@@ -11,17 +11,21 @@ import type {
   Badge,
   BadgeKey,
   CheckInAnswers,
+  FlashCard,
   FlashcardArchiveEntry,
   FlashcardReview,
   PillarKey,
+  RawImportCard,
   Session,
   UserSettings,
   UserStats,
 } from '@/context/types';
 import {
+  deleteArchiveCardsForWeek,
   getAllBadges,
   getArchiveCardsForWeek,
-  getMostUnknownTopic,
+  getFlashcardReviewForWeek,
+  getKnownCardsForWeek,
   getRecentSessions,
   getSettings,
   getTotalFlashcardBatches,
@@ -45,23 +49,6 @@ import {
   toDateString,
   XP,
 } from '@/lib/xp';
-import { FLASHCARD_TOPICS } from '@/data/flashcard-topics';
-
-// API key: prefer the user-entered key (persisted in SQLite), fall back to the
-// build-time env var so the app works out of the box without manual entry.
-const ENV_API_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ?? '';
-function effectiveApiKey(settingsKey: string): string {
-  return settingsKey.trim() || ENV_API_KEY;
-}
-
-// Week number → topic (1-indexed, wraps after 10 using archive data for 11-12)
-function getTopicForWeek(weekNumber: number, fallbackTopic: string | null): string {
-  const idx = ((weekNumber - 1) % 10);
-  if ((weekNumber === 11 || weekNumber === 12) && fallbackTopic) {
-    return fallbackTopic;
-  }
-  return FLASHCARD_TOPICS[idx] as string;
-}
 
 interface AppContextValue {
   isDbReady: boolean;
@@ -70,9 +57,8 @@ interface AppContextValue {
   unlockedBadges: Badge[];
   settings: UserSettings;
   pendingCheckIn: boolean;
-  newBatchReady: boolean;
   currentWeekCards: FlashcardArchiveEntry[];
-  generatingBatch: boolean;
+  weekCompleteInfo: { completedWeek: number } | null;
 
   logSession(params: {
     minutes: number;
@@ -86,8 +72,8 @@ interface AppContextValue {
   triggerConfetti(): void;
   refreshStats(): Promise<void>;
   markCard(id: number, status: 'known' | 'unknown'): Promise<void>;
-  dismissNewBatch(): void;
-  triggerWeeklyGeneration(): Promise<void>;
+  importWeeklyCards(weekNumber: number, rawCards: RawImportCard[]): Promise<void>;
+  dismissWeekComplete(): void;
 }
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -102,6 +88,10 @@ const DEFAULT_SETTINGS: UserSettings = {
   phrase_of_day_date: null,
   favorite_resource_ids: '',
   api_key: '',
+  cards_flipped: 0 as 0 | 1,
+  resource_title: 'This Week',
+  resource_subtitle: 'Learn Arabic with Maha',
+  resource_url: 'https://www.youtube.com/@LearnArabicwithMaha',
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -119,9 +109,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [unlockedBadges, setUnlockedBadges] = useState<Badge[]>([]);
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [pendingCheckIn, setPendingCheckIn] = useState(false);
-  const [newBatchReady, setNewBatchReady] = useState(false);
   const [currentWeekCards, setCurrentWeekCards] = useState<FlashcardArchiveEntry[]>([]);
-  const [generatingBatch, setGeneratingBatch] = useState(false);
+  const [weekCompleteInfo, setWeekCompleteInfo] = useState<{ completedWeek: number } | null>(null);
 
   const confettiRef = useRef<{ start: () => void } | null>(null);
 
@@ -140,78 +129,72 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const isSunday = new Date().getDay() === 0;
     const weekStart = getWeekStart();
+
+    let effectiveWeek = s.current_week;
+
     if (isSunday) {
       const { getCheckInForWeek } = await import('@/lib/db');
       const existing = await getCheckInForWeek(weekStart);
       setPendingCheckIn(!existing);
+
+      // Week advance: if user completed a study session this week and week < 12
+      if (s.current_week < 12) {
+        const review = await getFlashcardReviewForWeek(s.current_week);
+        if (review) {
+          const knownCards = await getKnownCardsForWeek(s.current_week);
+          const phraseCard = knownCards.length > 0
+            ? knownCards[Math.floor(Math.random() * knownCards.length)]
+            : null;
+          const newWeek = s.current_week + 1;
+          await updateSettings({
+            current_week: newWeek,
+            phrase_of_day: phraseCard
+              ? JSON.stringify({
+                  arabic_script: phraseCard.arabic_script,
+                  transliteration: phraseCard.transliteration,
+                  english_meaning: phraseCard.english_meaning,
+                })
+              : s.phrase_of_day,
+            phrase_of_day_date: toDateString(),
+          });
+          setSettings(prev => ({ ...prev, current_week: newWeek }));
+          setWeekCompleteInfo({ completedWeek: s.current_week });
+          effectiveWeek = newWeek;
+        }
+      }
     }
 
-    // Load current week's cards
-    const cards = await getArchiveCardsForWeek(s.current_week);
+    const cards = await getArchiveCardsForWeek(effectiveWeek);
     setCurrentWeekCards(cards);
-
-    // Check if we need to generate a new batch
-    const currentWeekStart = getWeekStart();
-    const key = effectiveApiKey(s.api_key);
-    const needsGeneration =
-      key &&
-      cards.length === 0 &&
-      (!s.last_batch_date || s.last_batch_date < currentWeekStart);
-
-    if (needsGeneration) {
-      generateBatch(s.current_week, key);
-    }
 
     setIsDbReady(true);
   }
 
-  async function generateBatch(weekNumber: number, apiKey: string) {
-    setGeneratingBatch(true);
-    try {
-      const { generateFlashcards } = await import('@/lib/api');
-      const fallbackTopic = (weekNumber === 11 || weekNumber === 12)
-        ? await getMostUnknownTopic()
-        : null;
-      const topic = getTopicForWeek(weekNumber, fallbackTopic);
-      const cards = await generateFlashcards(topic, apiKey);
-      await insertArchiveCards(weekNumber, topic, cards);
-      await updateSettings({ last_batch_date: toDateString() });
-      const stored = await getArchiveCardsForWeek(weekNumber);
-      // On web the DB is a no-op stub so stored will be []; use the raw API
-      // response directly so cards are visible for the session.
-      const toSet: FlashcardArchiveEntry[] = stored.length > 0
-        ? stored
-        : cards.map((c, i) => ({
-            id: i + 1,
-            week_number: weekNumber,
-            topic,
-            ...c,
-            status: 'unknown' as const,
-            created_at: new Date().toISOString(),
-          }));
-      setCurrentWeekCards(toSet);
-      setSettings(prev => ({ ...prev, last_batch_date: toDateString() }));
-      setNewBatchReady(true);
-    } catch (e) {
-      console.error('Weekly batch generation failed:', e);
-      // Reset last_batch_date so a retry is allowed on next app load
-      await updateSettings({ last_batch_date: null });
-    } finally {
-      setGeneratingBatch(false);
-    }
-  }
-
-  const triggerWeeklyGeneration = useCallback(async () => {
-    const s = await getSettings();
-    const key = effectiveApiKey(s.api_key);
-    if (!key) return;
-    const cards = await getArchiveCardsForWeek(s.current_week);
-    if (cards.length > 0) {
-      setCurrentWeekCards(cards);
-      return;
-    }
-    await generateBatch(s.current_week, key);
+  const importWeeklyCards = useCallback(async (weekNumber: number, rawCards: RawImportCard[]) => {
+    const topic = `Week ${weekNumber}`;
+    const cards: FlashCard[] = rawCards.map(c => ({
+      arabic_script: c.arabic,
+      transliteration: c.transliteration,
+      english_meaning: c.english,
+      example_situation: c.situation,
+    }));
+    await deleteArchiveCardsForWeek(weekNumber);
+    await insertArchiveCards(weekNumber, topic, cards);
+    const stored = await getArchiveCardsForWeek(weekNumber);
+    const toSet: FlashcardArchiveEntry[] = stored.length > 0
+      ? stored
+      : cards.map((c, i) => ({
+          id: i + 1,
+          week_number: weekNumber,
+          topic,
+          ...c,
+          status: 'unknown' as const,
+          created_at: new Date().toISOString(),
+        }));
+    setCurrentWeekCards(toSet);
   }, []);
+
+  const dismissWeekComplete = useCallback(() => setWeekCompleteInfo(null), []);
 
   const refreshStats = useCallback(async () => {
     const [s, badges] = await Promise.all([getSettings(), getAllBadges()]);
@@ -231,8 +214,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       prev.map(c => (c.id === id ? { ...c, status } : c))
     );
   }, []);
-
-  const dismissNewBatch = useCallback(() => setNewBatchReady(false), []);
 
   const logSession = useCallback(
     async ({
@@ -378,15 +359,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const patchSettings = useCallback(async (patch: Partial<UserSettings>) => {
     await updateSettings(patch);
     setSettings(prev => ({ ...prev, ...patch }));
-    // If API key was just added and we have no cards, trigger generation
-    if (patch.api_key !== undefined) {
-      const s = await getSettings();
-      const key = effectiveApiKey(patch.api_key);
-      if (key) {
-        const cards = await getArchiveCardsForWeek(s.current_week);
-        if (cards.length === 0) generateBatch(s.current_week, key);
-      }
-    }
   }, []);
 
   return (
@@ -398,9 +370,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         unlockedBadges,
         settings,
         pendingCheckIn,
-        newBatchReady,
         currentWeekCards,
-        generatingBatch,
+        weekCompleteInfo,
         logSession,
         saveFlashcardBatch,
         saveCheckIn,
@@ -408,8 +379,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         triggerConfetti,
         refreshStats,
         markCard,
-        dismissNewBatch,
-        triggerWeeklyGeneration,
+        importWeeklyCards,
+        dismissWeekComplete,
       }}
     >
       {children}

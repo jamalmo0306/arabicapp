@@ -1,7 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,12 +15,11 @@ import { ModalSheet } from '@/components/ui/modal-sheet';
 import { Spacing } from '@/constants/theme';
 import { useAppContext } from '@/context/app-context';
 import type { CheckInAnswers } from '@/context/types';
-import { generateCheckInResponse } from '@/lib/api';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function CheckInModal() {
   const colors = useTheme();
-  const { saveCheckIn, settings } = useAppContext();
+  const { saveCheckIn } = useAppContext();
 
   const [minutes, setMinutes] = useState('');
   const [pillars, setPillars] = useState('');
@@ -30,43 +28,20 @@ export default function CheckInModal() {
   const [boringThing, setBoringThing] = useState('');
   const [tutorHappened, setTutorHappened] = useState(false);
 
-  const [loading, setLoading] = useState(false);
-  const [aiResponse, setAiResponse] = useState('');
   const [done, setDone] = useState(false);
 
   async function handleSubmit() {
     if (!minutes) return;
-    setLoading(true);
-    try {
-      const answers: CheckInAnswers = {
-        minutes: parseInt(minutes, 10) || 0,
-        pillars: pillars.trim(),
-        anki_count: parseInt(ankiCount, 10) || 0,
-        new_sentence: newSentence.trim(),
-        boring_thing: boringThing.trim(),
-        tutor_happened: tutorHappened,
-      };
-      const response = await generateCheckInResponse(answers, settings.api_key);
-      await saveCheckIn(answers, response);
-      setAiResponse(response);
-      setDone(true);
-    } catch (e) {
-      setAiResponse('Could not reach the AI coach right now. Your check-in has been saved.');
-      await saveCheckIn(
-        {
-          minutes: parseInt(minutes, 10) || 0,
-          pillars: pillars.trim(),
-          anki_count: parseInt(ankiCount, 10) || 0,
-          new_sentence: newSentence.trim(),
-          boring_thing: boringThing.trim(),
-          tutor_happened: tutorHappened,
-        },
-        ''
-      );
-      setDone(true);
-    } finally {
-      setLoading(false);
-    }
+    const answers: CheckInAnswers = {
+      minutes: parseInt(minutes, 10) || 0,
+      pillars: pillars.trim(),
+      anki_count: parseInt(ankiCount, 10) || 0,
+      new_sentence: newSentence.trim(),
+      boring_thing: boringThing.trim(),
+      tutor_happened: tutorHappened,
+    };
+    await saveCheckIn(answers, '');
+    setDone(true);
   }
 
   return (
@@ -79,16 +54,8 @@ export default function CheckInModal() {
           <View style={styles.responseContainer}>
             <ThemedText style={styles.successEmoji}>🌿</ThemedText>
             <ThemedText type="subtitle" style={{ color: colors.primary }}>
-              Check-in complete!
+              Check-in saved!
             </ThemedText>
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.coachLabel}>
-              YOUR COACH SAYS:
-            </ThemedText>
-            <ThemedView
-              type="surface"
-              style={[styles.responseCard, { borderColor: colors.accent }]}>
-              <ThemedText style={styles.responseText}>{aiResponse}</ThemedText>
-            </ThemedView>
             <ThemedText type="small" style={{ color: colors.accent }}>
               +20 XP earned
             </ThemedText>
@@ -101,7 +68,7 @@ export default function CheckInModal() {
         ) : (
           <>
             <ThemedText type="small" themeColor="textSecondary">
-              Six quick questions — your AI coach will respond.
+              Six quick questions to track your week.
             </ThemedText>
 
             <Field
@@ -160,20 +127,9 @@ export default function CheckInModal() {
 
             <Pressable
               onPress={handleSubmit}
-              disabled={loading || !minutes}
-              style={[
-                styles.submitBtn,
-                {
-                  backgroundColor: !minutes ? colors.divider : colors.primary,
-                },
-              ]}>
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <ThemedText style={styles.submitBtnText}>
-                  Submit & get feedback
-                </ThemedText>
-              )}
+              disabled={!minutes}
+              style={[styles.submitBtn, { backgroundColor: !minutes ? colors.divider : colors.primary }]}>
+              <ThemedText style={styles.submitBtnText}>Save Check-In</ThemedText>
             </Pressable>
           </>
         )}
@@ -255,14 +211,6 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.two,
   },
   successEmoji: { fontSize: 64 },
-  coachLabel: { letterSpacing: 0.8, fontSize: 11, alignSelf: 'flex-start' },
-  responseCard: {
-    borderRadius: Spacing.three,
-    padding: Spacing.four,
-    borderWidth: 1.5,
-    alignSelf: 'stretch',
-  },
-  responseText: { fontSize: 16, lineHeight: 24 },
   doneBtn: {
     paddingHorizontal: Spacing.six,
     paddingVertical: Spacing.three,
