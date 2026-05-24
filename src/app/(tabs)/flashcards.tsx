@@ -122,7 +122,7 @@ export default function FlashcardsScreen() {
 
   // ── Generating ────────────────────────────────────────────────────────────
 
-  if (generatingBatch || (cards.length === 0 && !reviewWeek && settings.api_key)) {
+  if (generatingBatch || (cards.length === 0 && !reviewWeek && effectiveKey)) {
     return (
       <ThemedView style={[styles.root, styles.center, { backgroundColor: colors.cream }]}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -196,6 +196,8 @@ export default function FlashcardsScreen() {
 
   const card = cards[cardIndex];
   const topic = cards[0]?.topic ?? '';
+
+  if (!card) return null;
 
   return (
     <ThemedView style={[styles.root, { backgroundColor: colors.cream }]}>
