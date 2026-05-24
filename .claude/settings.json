@@ -1,0 +1,11 @@
+{
+  "enabledPlugins": {
+    "expo@claude-plugins-official": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(C:\\Program Files\\nodejs\\npm.cmd:*)",
+      "Bash(C:\\Program Files\\nodejs\\npx.cmd:*)"
+    ]
+  }
+}
