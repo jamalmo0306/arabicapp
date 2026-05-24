@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
   Image,
@@ -20,7 +20,10 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
+import { useAppContext } from '@/context/app-context';
+import { PILLARS } from '@/lib/xp';
+import type { PillarKey } from '@/context/types';
 
 // Static width for StyleSheet-time calculations only
 const { width } = Dimensions.get('window');
@@ -44,32 +47,14 @@ const COLORS = {
   blackGlass:  'rgba(14, 15, 15, 0.78)',
 };
 
-// ── Hardcoded data — wire up DB separately ─────────────────────────────────────
-const XP_TOTAL          = 0;
-const STREAK            = 0;
-const DAILY_XP          = 0;
-const DAILY_XP_GOAL     = 20;
-const DAILY_DAYS        = 0;
-const PHRASE_CHUNKS     = 0;
-const PHRASE_CHUNKS_MAX = 300;
-const LISTENING_STREAK  = 0;
-const SPEAKING_MIN      = 0;
-const STUDY_STREAK      = 0;
-const MILESTONE_NOW     = 0;
-const MILESTONE_GOAL    = 10;
+const MILESTONE_GOAL = 10;
 
-// ── HeroButton ─────────────────────────────────────────────────────────────────
-type HeroButtonProps = { icon: string; title: string; subtitle: string };
-
-function HeroButton({ icon, title, subtitle }: HeroButtonProps) {
-  return (
-    <TouchableOpacity activeOpacity={0.82} style={s.heroButton}>
-      <Text style={s.heroButtonIcon}>{icon}</Text>
-      <Text style={s.heroButtonTitle}>{title}</Text>
-      <Text style={s.heroButtonSub}>{subtitle}</Text>
-    </TouchableOpacity>
-  );
-}
+const PILLAR_SUBTITLES: Record<PillarKey, string> = {
+  flashcards: 'Review &\npractice',
+  structured: 'Lessons &\ngrammar',
+  speaking:   'Talk &\nget better',
+  listening:  'Train\nyour ear',
+};
 
 // ── ProgressCard ───────────────────────────────────────────────────────────────
 type ProgressCardProps = {
@@ -115,6 +100,38 @@ function ProgressCard({ icon, title, value, suffix, subtitle, percent, dots, car
 // ── HomeScreen ─────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
   const { width: dynWidth } = useWindowDimensions();
+  const { streak, xpTotal, currentWeekCards, logSession, generatingBatch } = useAppContext();
+
+  const [checkedPillars, setCheckedPillars] = useState<Set<PillarKey>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [justLogged, setJustLogged] = useState(false);
+
+  // Pick a consistent phrase of the day from this week's cards
+  const phraseCard = useMemo(() => {
+    if (!currentWeekCards.length) return null;
+    return currentWeekCards[new Date().getDate() % currentWeekCards.length];
+  }, [currentWeekCards]);
+
+  function togglePillar(key: PillarKey) {
+    setCheckedPillars(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  async function handleLogSession() {
+    if (checkedPillars.size === 0 || saving) return;
+    setSaving(true);
+    try {
+      await logSession({ minutes: 0, pillars: Array.from(checkedPillars) });
+      setCheckedPillars(new Set());
+      setJustLogged(true);
+      setTimeout(() => setJustLogged(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   // Camel: scale size with screen width so it grows with the background image.
   // Position at a fixed % of the hero height — same relative spot every resize.
@@ -196,7 +213,7 @@ export default function HomeScreen() {
               <Text style={s.appTitle}>Arabic Hub</Text>
             </View>
             <View style={s.xpPill}>
-              <Text style={s.xpText}>⭐ {XP_TOTAL} XP</Text>
+              <Text style={s.xpText}>⭐ {xpTotal} XP</Text>
             </View>
           </View>
 
@@ -206,7 +223,7 @@ export default function HomeScreen() {
             {/* Streak */}
             <View style={s.streakCard}>
               <Text style={s.flame}>🔥</Text>
-              <Text style={s.bigNumber}>{STREAK}</Text>
+              <Text style={s.bigNumber}>{streak}</Text>
               <Text style={s.smallLabelDark}>day streak</Text>
               <View style={s.dotsRow}>
                 <View style={[s.dot, s.dotActive]} />
@@ -220,34 +237,41 @@ export default function HomeScreen() {
             {/* Daily Goal */}
             <View style={s.goalCard}>
               <View style={s.goalLeft}>
-                <Text style={s.cardTitleDark}>Daily Goal</Text>
+                <Text style={s.cardTitleDark}>Total XP</Text>
                 <Text style={s.goalText}>
-                  <Text style={s.goalOrange}>{DAILY_XP}</Text>
-                  <Text style={s.goalText}> / {DAILY_XP_GOAL} XP</Text>
+                  <Text style={s.goalOrange}>{xpTotal}</Text>
+                  <Text style={s.goalText}> XP</Text>
                 </Text>
                 <View style={s.progressTrackLight}>
-                  <View
-                    style={[
-                      s.progressFill,
-                      { width: `${Math.max(3, (DAILY_XP / DAILY_XP_GOAL) * 100)}%` },
-                    ]}
-                  />
+                  <View style={[s.progressFill, { width: `${Math.min(100, (xpTotal % 100))}%` }]} />
                 </View>
               </View>
               <View style={s.goalDivider} />
               <View style={s.goalDays}>
-                <Text style={s.calendarIcon}>🗓️</Text>
-                <Text style={s.goalDaysNumber}>{DAILY_DAYS}</Text>
-                <Text style={s.smallLabelDark}>days</Text>
+                <Text style={s.calendarIcon}>🔥</Text>
+                <Text style={s.goalDaysNumber}>{streak}</Text>
+                <Text style={s.smallLabelDark}>streak</Text>
               </View>
             </View>
 
             {/* Phrase of the Day */}
             <View style={s.phraseCard}>
               <Text style={s.cardTitleDark}>💬 Phrase of the Day</Text>
-              <Text style={s.arabicText}>كيف حالك؟</Text>
-              <Text style={s.translitText}>Kayf halak?</Text>
-              <Text style={s.meaningText}>How are you?</Text>
+              {phraseCard ? (
+                <>
+                  <Text style={s.arabicText}>{phraseCard.arabic_script}</Text>
+                  <Text style={s.translitText}>{phraseCard.transliteration}</Text>
+                  <Text style={s.meaningText}>{phraseCard.english_meaning}</Text>
+                </>
+              ) : generatingBatch ? (
+                <Text style={s.meaningText}>Generating phrases…</Text>
+              ) : (
+                <>
+                  <Text style={s.arabicText}>كيف حالك؟</Text>
+                  <Text style={s.translitText}>Kayf halak?</Text>
+                  <Text style={s.meaningText}>How are you?</Text>
+                </>
+              )}
             </View>
 
           </View>
@@ -271,45 +295,45 @@ export default function HomeScreen() {
               resizeMode="contain"
             />
 
-            {/* Layer 3 — pillar buttons: fixed at hero bottom (do NOT pan) */}
+            {/* Layer 3 — pillar buttons: tap to mark complete (turns gold) */}
             <View style={s.heroButtonRow}>
-              <HeroButton icon="🃏"  title="Flashcards"       subtitle="Review & practice"   />
-              <HeroButton icon="📖"  title="Structured Study" subtitle="Lessons & grammar"   />
-              <HeroButton icon="🗣️"  title="Speaking"         subtitle="Talk & get better"   />
-              <HeroButton icon="🎧"  title="Listening"        subtitle="Train your ear"      />
-              <HeroButton icon="📚"  title="Resources"        subtitle="Guides & tools"      />
+              {PILLARS.map(p => {
+                const checked = checkedPillars.has(p.key);
+                return (
+                  <TouchableOpacity
+                    key={p.key}
+                    activeOpacity={0.82}
+                    style={[s.heroButton, checked && s.heroButtonActive]}
+                    onPress={() => togglePillar(p.key)}
+                  >
+                    <Text style={s.heroButtonIcon}>{p.emoji}</Text>
+                    <Text style={[s.heroButtonTitle, checked && s.heroButtonTitleActive]}>
+                      {p.key === 'structured' ? 'Structured\nStudy' : p.label}
+                    </Text>
+                    <Text style={s.heroButtonSub}>{PILLAR_SUBTITLES[p.key]}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {/* Resources navigates — not a loggable pillar */}
+              <TouchableOpacity
+                activeOpacity={0.82}
+                style={s.heroButton}
+                onPress={() => router.push('/(tabs)/resources')}
+              >
+                <Text style={s.heroButtonIcon}>📚</Text>
+                <Text style={s.heroButtonTitle}>Resources</Text>
+                <Text style={s.heroButtonSub}>Guides &{'\n'}tools</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
           {/* ── PROGRESS SECTION ── */}
 
-          {/* Row 1: three equal cards */}
-          <View style={s.progressRow}>
-            <ProgressCard
-              icon="✨" title="Phrase Chunks"
-              value={`${PHRASE_CHUNKS}`} suffix={`/ ${PHRASE_CHUNKS_MAX}`}
-              subtitle="chunks learned" percent="0%"
-              cardStyle={s.progressCardThird}
-            />
-            <ProgressCard
-              icon="🎧" title="Listening Streak"
-              value={`${LISTENING_STREAK}`}
-              subtitle="days in a row" dots
-              cardStyle={s.progressCardThird}
-            />
-            <ProgressCard
-              icon="🗣️" title="Speaking Practice"
-              value={`${SPEAKING_MIN}`} suffix="min"
-              subtitle="this week" percent="0%"
-              cardStyle={s.progressCardThird}
-            />
-          </View>
-
-          {/* Row 2: Study Streak + Next Milestone */}
+          {/* Study Streak + Next Milestone */}
           <View style={s.progressRow}>
             <ProgressCard
               icon="🔥" title="Study Streak"
-              value={`${STUDY_STREAK}`}
+              value={`${streak}`}
               subtitle="days in a row" dots
               cardStyle={s.progressCardHalf}
             />
@@ -327,18 +351,30 @@ export default function HomeScreen() {
                   <View
                     style={[
                       s.progressFillDark,
-                      { width: `${(MILESTONE_NOW / MILESTONE_GOAL) * 100}%` },
+                      { width: `${Math.min(100, (currentWeekCards.filter(c => c.status === 'known').length / MILESTONE_GOAL) * 100)}%` },
                     ]}
                   />
                 </View>
-                <Text style={s.milestoneCount}>{MILESTONE_NOW} / {MILESTONE_GOAL}</Text>
+                <Text style={s.milestoneCount}>{currentWeekCards.filter(c => c.status === 'known').length} / {MILESTONE_GOAL}</Text>
               </View>
             </View>
           </View>
 
         </ScrollView>
 
-        {/* BottomNav is rendered by (tabs)/_layout.tsx — no duplicate here */}
+        {/* Floating log button — appears when any pillar is checked */}
+        {(checkedPillars.size > 0 || justLogged) && (
+          <TouchableOpacity
+            style={[s.logBtn, justLogged && s.logBtnDone]}
+            onPress={handleLogSession}
+            disabled={saving || justLogged}
+            activeOpacity={0.85}
+          >
+            <Text style={s.logBtnText}>
+              {justLogged ? '✓ Logged!' : saving ? 'Logging…' : `✓ Log ${checkedPillars.size} pillar${checkedPillars.size > 1 ? 's' : ''}`}
+            </Text>
+          </TouchableOpacity>
+        )}
       </SafeAreaView>
     </>
   );
@@ -498,7 +534,32 @@ const s = StyleSheet.create({
   },
   heroButtonIcon:  { fontSize: 28, marginBottom: 8 },
   heroButtonTitle: { color: COLORS.gold, fontSize: 13, fontWeight: '800', textAlign: 'center', lineHeight: 16 },
+  heroButtonTitleActive: { color: COLORS.gold },
   heroButtonSub:   { color: '#F1DEBD', fontSize: 11, textAlign: 'center', lineHeight: 15, marginTop: 4 },
+  heroButtonActive: {
+    backgroundColor: 'rgba(247, 198, 83, 0.30)',
+    borderColor: COLORS.gold,
+    borderWidth: 1.5,
+  },
+
+  // ─ Floating log button ─
+  logBtn: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 114,   // clears the 80px nav + 16px gap + 18px buffer
+    backgroundColor: COLORS.olive,
+    borderRadius: 20,
+    paddingVertical: 18,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.32,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  logBtnDone: { backgroundColor: COLORS.oliveDark },
+  logBtnText: { color: '#15150F', fontSize: 17, fontWeight: '800', letterSpacing: 0.3 },
 
   // ─ Progress rows ─
   progressRow: {

@@ -51,7 +51,8 @@ export default function FlashcardsScreen() {
 
   // Trigger generation if no cards and key is set
   useEffect(() => {
-    if (isDbReady && !reviewWeek && settings.api_key && currentWeekCards.length === 0 && !generatingBatch) {
+    const key = settings.api_key || process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '';
+    if (isDbReady && !reviewWeek && key && currentWeekCards.length === 0 && !generatingBatch) {
       triggerWeeklyGeneration();
     }
   }, [isDbReady, settings.api_key]);
@@ -95,7 +96,8 @@ export default function FlashcardsScreen() {
     );
   }
 
-  if (!settings.api_key && !reviewWeek) {
+  const effectiveKey = settings.api_key || process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '';
+  if (!effectiveKey && !reviewWeek) {
     return (
       <ThemedView style={[styles.root, styles.center, { backgroundColor: colors.cream }]}>
         <SafeAreaView style={[styles.safe, styles.center]}>

@@ -10,7 +10,7 @@ function makeClient(apiKey: string) {
 async function callClaude(apiKey: string, prompt: string): Promise<string> {
   const message = await makeClient(apiKey).messages.create({
     model: MODEL,
-    max_tokens: 1024,
+    max_tokens: 2048,
     messages: [{ role: 'user', content: prompt }],
   });
   const block = message.content[0];

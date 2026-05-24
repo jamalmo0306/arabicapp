@@ -47,6 +47,13 @@ import {
 } from '@/lib/xp';
 import { FLASHCARD_TOPICS } from '@/data/flashcard-topics';
 
+// API key: prefer the user-entered key (persisted in SQLite), fall back to the
+// build-time env var so the app works out of the box without manual entry.
+const ENV_API_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ?? '';
+function effectiveApiKey(settingsKey: string): string {
+  return settingsKey.trim() || ENV_API_KEY;
+}
+
 // Week number → topic (1-indexed, wraps after 10 using archive data for 11-12)
 function getTopicForWeek(weekNumber: number, fallbackTopic: string | null): string {
   const idx = ((weekNumber - 1) % 10);
@@ -145,13 +152,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     // Check if we need to generate a new batch
     const currentWeekStart = getWeekStart();
+    const key = effectiveApiKey(s.api_key);
     const needsGeneration =
-      s.api_key &&
+      key &&
       cards.length === 0 &&
       (!s.last_batch_date || s.last_batch_date < currentWeekStart);
 
     if (needsGeneration) {
-      generateBatch(s.current_week, s.api_key);
+      generateBatch(s.current_week, key);
     }
 
     setIsDbReady(true);
@@ -181,13 +189,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const triggerWeeklyGeneration = useCallback(async () => {
     const s = await getSettings();
-    if (!s.api_key) return;
+    const key = effectiveApiKey(s.api_key);
+    if (!key) return;
     const cards = await getArchiveCardsForWeek(s.current_week);
     if (cards.length > 0) {
       setCurrentWeekCards(cards);
       return;
     }
-    await generateBatch(s.current_week, s.api_key);
+    await generateBatch(s.current_week, key);
   }, []);
 
   const refreshStats = useCallback(async () => {
@@ -293,10 +302,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     async (review: Omit<FlashcardReview, 'id'>) => {
       await insertFlashcardReview(review);
       const currentSettings = await getSettings();
-      const newStreak = currentSettings.streak_count;
+      const today = toDateString();
+      const newStreak = calcNewStreak(currentSettings.last_session_date, currentSettings.streak_count, today);
       const xp = XP.FLASHCARD_BATCH * (newStreak >= 7 ? 2 : 1);
       const newXpTotal = currentSettings.xp_total + xp;
-      await updateSettings({ xp_total: newXpTotal });
+      await updateSettings({ xp_total: newXpTotal, streak_count: newStreak, last_session_date: today });
+      setStreak(newStreak);
 
       const [totalBatches, allBadges] = await Promise.all([
         getTotalFlashcardBatches(),
@@ -354,11 +365,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await updateSettings(patch);
     setSettings(prev => ({ ...prev, ...patch }));
     // If API key was just added and we have no cards, trigger generation
-    if (patch.api_key && patch.api_key.trim()) {
+    if (patch.api_key !== undefined) {
       const s = await getSettings();
-      const cards = await getArchiveCardsForWeek(s.current_week);
-      if (cards.length === 0) {
-        generateBatch(s.current_week, patch.api_key.trim());
+      const key = effectiveApiKey(patch.api_key);
+      if (key) {
+        const cards = await getArchiveCardsForWeek(s.current_week);
+        if (cards.length === 0) generateBatch(s.current_week, key);
       }
     }
   }, []);
