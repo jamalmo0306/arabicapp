@@ -73,6 +73,7 @@ interface AppContextValue {
   refreshStats(): Promise<void>;
   markCard(id: number, status: 'known' | 'unknown'): Promise<void>;
   importWeeklyCards(weekNumber: number, rawCards: RawImportCard[]): Promise<void>;
+  clearWeekCards(weekNumber: number): Promise<void>;
   dismissWeekComplete(): void;
 }
 
@@ -192,6 +193,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           created_at: new Date().toISOString(),
         }));
     setCurrentWeekCards(toSet);
+
+    if (toSet.length > 0) {
+      const phraseCard = toSet[Math.floor(Math.random() * toSet.length)];
+      const phraseJson = JSON.stringify({
+        arabic_script: phraseCard.arabic_script,
+        transliteration: phraseCard.transliteration,
+        english_meaning: phraseCard.english_meaning,
+      });
+      await updateSettings({ phrase_of_day: phraseJson, phrase_of_day_date: toDateString() });
+      setSettings(prev => ({ ...prev, phrase_of_day: phraseJson, phrase_of_day_date: toDateString() }));
+    }
+  }, []);
+
+  const clearWeekCards = useCallback(async (weekNumber: number) => {
+    await deleteArchiveCardsForWeek(weekNumber);
+    setCurrentWeekCards([]);
   }, []);
 
   const dismissWeekComplete = useCallback(() => setWeekCompleteInfo(null), []);
@@ -380,6 +397,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         refreshStats,
         markCard,
         importWeeklyCards,
+        clearWeekCards,
         dismissWeekComplete,
       }}
     >

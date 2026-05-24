@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Spacing } from '@/constants/theme';
+import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useAppContext } from '@/context/app-context';
 import type { FlashcardArchiveEntry, RawImportCard } from '@/context/types';
 import { getArchiveCardsForWeek } from '@/lib/db';
@@ -52,6 +52,7 @@ export default function FlashcardsScreen() {
     markCard,
     saveFlashcardBatch,
     importWeeklyCards,
+    clearWeekCards,
     patchSettings,
   } = useAppContext();
 
@@ -62,6 +63,8 @@ export default function FlashcardsScreen() {
   const [goodIds, setGoodIds] = useState<Set<number>>(new Set());
   const [sessionCardIndex, setSessionCardIndex] = useState(0);
   const [sessionDone, setSessionDone] = useState(false);
+  const [history, setHistory] = useState<{ queue: FlashcardArchiveEntry[]; goodIds: Set<number> }[]>([]);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   // Import modal
   const [showImport, setShowImport] = useState(false);
@@ -79,6 +82,7 @@ export default function FlashcardsScreen() {
         setGoodIds(new Set());
         setSessionCardIndex(0);
         setSessionDone(false);
+        setHistory([]);
       });
     } else {
       setAllCards(currentWeekCards);
@@ -86,6 +90,7 @@ export default function FlashcardsScreen() {
       setGoodIds(new Set());
       setSessionCardIndex(0);
       setSessionDone(false);
+      setHistory([]);
     }
   }, [isDbReady, reviewWeek, currentWeekCards]);
 
@@ -93,6 +98,8 @@ export default function FlashcardsScreen() {
     const current = queue[0];
     if (!current) return;
     const rest = queue.slice(1);
+
+    setHistory(h => [...h, { queue, goodIds }]);
 
     if (rating === 'good') {
       markCard(current.id, 'known');
@@ -110,6 +117,15 @@ export default function FlashcardsScreen() {
       setQueue(next);
     }
     setSessionCardIndex(i => i + 1);
+  }
+
+  function goBack() {
+    if (history.length === 0) return;
+    const prev = history[history.length - 1];
+    setHistory(h => h.slice(0, -1));
+    setQueue(prev.queue);
+    setGoodIds(prev.goodIds);
+    setSessionCardIndex(i => Math.max(0, i - 1));
   }
 
   async function endSession(finalGood: Set<number>) {
@@ -130,6 +146,12 @@ export default function FlashcardsScreen() {
     setGoodIds(new Set());
     setSessionCardIndex(0);
     setSessionDone(false);
+    setHistory([]);
+  }
+
+  async function clearCards() {
+    setShowClearConfirm(false);
+    await clearWeekCards(settings.current_week);
   }
 
   function toggleOrientation() {
@@ -305,6 +327,7 @@ export default function FlashcardsScreen() {
           onToggle={toggleOrientation}
           onImport={!reviewWeek ? openImport : undefined}
           onArchive={!reviewWeek ? () => router.push('/archive') : undefined}
+          onClear={!reviewWeek ? () => setShowClearConfirm(true) : undefined}
         />
 
         {/* Progress */}
@@ -324,6 +347,8 @@ export default function FlashcardsScreen() {
           back={arabicFirst ? englishFace : arabicFace}
           frontDark={arabicFirst}
           onRate={rate}
+          onBack={goBack}
+          canGoBack={history.length > 0}
         />
       </SafeAreaView>
 
@@ -337,6 +362,24 @@ export default function FlashcardsScreen() {
         onLoad={handleLoadCards}
         onCancel={() => setShowImport(false)}
       />
+      <Modal visible={showClearConfirm} transparent animationType="fade">
+        <View style={s.confirmOverlay}>
+          <View style={s.confirmSheet}>
+            <Text style={s.confirmTitle}>Clear Week {settings.current_week} cards?</Text>
+            <Text style={s.confirmSub}>
+              This permanently removes all cards for this week from your archive.
+            </Text>
+            <View style={s.confirmActions}>
+              <Pressable onPress={() => setShowClearConfirm(false)} style={s.actionBtnSecondary}>
+                <Text style={[s.actionBtnText, { color: C.textDark }]}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={clearCards} style={[s.actionBtnPrimary, { backgroundColor: AGAIN_COLOR }]}>
+                <Text style={s.actionBtnText}>Clear</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -349,12 +392,14 @@ function TopBar({
   onToggle,
   onImport,
   onArchive,
+  onClear,
 }: {
   label: string;
   arabicFirst: boolean;
   onToggle: () => void;
   onImport?: () => void;
   onArchive?: () => void;
+  onClear?: () => void;
 }) {
   return (
     <View style={s.topBar}>
@@ -363,6 +408,11 @@ function TopBar({
         {onArchive && (
           <Pressable onPress={onArchive}>
             <Text style={s.archiveLink}>Archive →</Text>
+          </Pressable>
+        )}
+        {onClear && (
+          <Pressable onPress={onClear} style={s.clearBtn}>
+            <Text style={s.clearBtnText}>Clear</Text>
           </Pressable>
         )}
         {onImport && (
@@ -389,11 +439,15 @@ function StudyCard({
   back,
   frontDark,
   onRate,
+  onBack,
+  canGoBack,
 }: {
   front: React.ReactNode;
   back: React.ReactNode;
   frontDark: boolean;
   onRate: (r: 'again' | 'hard' | 'good') => void;
+  onBack: () => void;
+  canGoBack: boolean;
 }) {
   const [flipped, setFlipped] = useState(false);
 
@@ -416,6 +470,12 @@ function StudyCard({
         </View>
       ) : (
         <Text style={s.flipPrompt}>Tap card to reveal</Text>
+      )}
+
+      {canGoBack && (
+        <Pressable onPress={onBack} style={s.backBtn}>
+          <Text style={s.backBtnText}>← Back</Text>
+        </Pressable>
       )}
     </View>
   );
@@ -556,7 +616,7 @@ const s = StyleSheet.create({
   studyArea: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingBottom: 28,
+    paddingBottom: BottomTabInset + 16,
     gap: 16,
   },
   cardContainer: { flex: 1 },
@@ -738,4 +798,43 @@ const s = StyleSheet.create({
     gap: 12,
     marginTop: 14,
   },
+
+  // Back button
+  backBtn: {
+    alignSelf: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  backBtnText: { color: C.mutedDark, fontSize: 13, fontWeight: '600' },
+
+  // Clear button (TopBar)
+  clearBtn: {
+    backgroundColor: 'rgba(192,57,43,0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(192,57,43,0.35)',
+  },
+  clearBtnText: { color: AGAIN_COLOR, fontWeight: '700', fontSize: 12 },
+
+  // Clear confirmation modal
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  confirmSheet: {
+    backgroundColor: C.cardLight,
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 340,
+    gap: 12,
+  },
+  confirmTitle: { color: C.textDark, fontSize: 18, fontWeight: '800' },
+  confirmSub: { color: C.mutedDark, fontSize: 14, lineHeight: 20 },
+  confirmActions: { flexDirection: 'row', gap: 12, marginTop: 4 },
 });
