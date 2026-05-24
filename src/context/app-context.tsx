@@ -177,11 +177,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await insertArchiveCards(weekNumber, topic, cards);
       await updateSettings({ last_batch_date: toDateString() });
       const stored = await getArchiveCardsForWeek(weekNumber);
-      setCurrentWeekCards(stored);
+      // On web the DB is a no-op stub so stored will be []; use the raw API
+      // response directly so cards are visible for the session.
+      const toSet: FlashcardArchiveEntry[] = stored.length > 0
+        ? stored
+        : cards.map((c, i) => ({
+            id: i + 1,
+            week_number: weekNumber,
+            topic,
+            ...c,
+            status: 'unknown' as const,
+            created_at: new Date().toISOString(),
+          }));
+      setCurrentWeekCards(toSet);
       setSettings(prev => ({ ...prev, last_batch_date: toDateString() }));
       setNewBatchReady(true);
     } catch (e) {
-      console.warn('Weekly batch generation failed:', e);
+      console.error('Weekly batch generation failed:', e);
+      // Reset last_batch_date so a retry is allowed on next app load
+      await updateSettings({ last_batch_date: null });
     } finally {
       setGeneratingBatch(false);
     }
