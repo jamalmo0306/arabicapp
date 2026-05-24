@@ -26,8 +26,8 @@ There are no tests in this project.
 ```
 AppProvider (src/context/app-context.tsx)
   └─ ThemeProvider + Stack (src/app/_layout.tsx)
-       ├─ (tabs)/_layout.tsx  →  AppTabs (5 native tab bar items)
-       │    ├─ index.tsx         Dashboard (streak, XP, phrase of day, pillars, new-batch banner)
+       ├─ (tabs)/_layout.tsx  →  AppTabs + BottomNav overlay
+       │    ├─ index.tsx         → re-exports HomeScreen (src/components/HomeScreen.tsx)
        │    ├─ flashcards.tsx    Weekly flashcard engine (English-front / Arabic-back)
        │    ├─ log.tsx           Session log + bar chart
        │    ├─ resources.tsx     Filterable resource list
@@ -84,23 +84,35 @@ Functions: `generateFlashcards(topic, apiKey)` → `FlashCard[]`, `generatePhras
 
 Phrase of the day is cached in `user_settings.phrase_of_day` + `phrase_of_day_date` (only one API call per calendar day).
 
+### Navigation: custom BottomNav
+
+The native tab bar is hidden. Navigation is handled by `src/components/bottom-nav.tsx`, a floating pill overlay rendered in `(tabs)/_layout.tsx` on top of `AppTabs`. `BottomNav` uses `useSegments()` to determine the active tab and `router.push()` to navigate.
+
+`AppTabs` (native) uses `expo-router`'s `Tabs` with `tabBarStyle: { display: 'none' }`. `AppTabs` (web) uses `expo-router/ui`'s `Tabs` with a hidden `TabList` — both exist only to register routes.
+
 ### Styling system
 
-**No NativeWind.** All styles use `StyleSheet.create` with tokens from `src/constants/theme.ts`:
-- `Colors.light` / `Colors.dark` — full palette including `primary` (olive `#4A5E3A`), `accent` (gold `#C9952A`), `surface`, `cream`, `onPrimary`, `divider`
-- `ThemeColor = keyof typeof Colors.light` — pass as the `type` prop to `ThemedView` / `ThemedText`
-- `useTheme()` → returns the active `Colors.light` or `Colors.dark` object
-- `Spacing` — numeric scale: `half(2) one(4) two(8) three(16) four(24) five(32) six(64)`
+**Two coexisting style patterns** — new screens use inline color constants; older components use the theme system:
 
-Dark mode is stored in `user_settings.dark_mode` (`'light'|'dark'|'system'`). The override is written via `patchSettings` but does not yet feed back into `useTheme()` — screens still read the OS scheme directly.
+**New pattern** (HomeScreen, Log, Resources, Settings): each file defines a local `const C = { ... }` palette using the sand/dark aesthetic (`scrollBg: '#CBB77C'`, `bg: '#15150F'`, `blackGlass: 'rgba(14,15,15,0.88)'`, `gold: '#F7C653'`, `olive: '#9BC76D'`). No `useTheme()`.
+
+**Old pattern** (ThemedView, ThemedText, ui components): `StyleSheet.create` with tokens from `src/constants/theme.ts`:
+- `Colors.light` / `Colors.dark` — `primary` (olive `#4A5E3A`), `accent` (gold `#C9952A`), `surface`, `cream`, `onPrimary`, `divider`
+- `useTheme()` → returns active palette; `Spacing` — `half(2) one(4) two(8) three(16) four(24) five(32) six(64)`
+
+Dark mode is stored in `user_settings.dark_mode` (`'light'|'dark'|'system'`). The override is written via `patchSettings` but does not yet feed back into `useTheme()`.
 
 ### Platform-specific files
 
 `.web.tsx` / `.web.ts` suffix files override their native counterparts on web (Expo's automatic platform resolution):
 - `src/lib/db.web.ts` — complete no-op stub; all reads return empty/defaults so web renders without SQLite
-- `src/components/app-tabs.web.tsx` — uses `expo-router/ui` Tabs instead of `NativeTabs`
+- `src/components/app-tabs.web.tsx` — uses `expo-router/ui` Tabs with hidden TabList (navigation via BottomNav)
 - `src/components/animated-icon.web.tsx` — CSS-based animation
 - `src/hooks/use-color-scheme.web.ts` — hydration-safe SSR version
+
+### Image assets
+
+Untracked image files at repo root: `desertbackgroud.png`, `guyoncamelsprite.png`, `arabicappmockupimage.png`. Animation frames in `GUYONCAMELANIMATION/` (camelanimation.png through camelanimation7.png). These are not yet imported anywhere — placeholder for a future hero/animation feature. The hero section in `HomeScreen.tsx` has a `TODO` comment showing exactly where to wire in an `ImageBackground`.
 
 ### XP and badge logic
 
