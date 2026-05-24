@@ -1,15 +1,20 @@
 import Anthropic from '@anthropic-ai/sdk';
 
 import type { CheckInAnswers, FlashCard, PhraseOfDay } from '@/context/types';
-const MODEL = 'claude-sonnet-4-6';
+
+// Haiku is used for structured JSON generation (flashcards, phrase of day) —
+// 5x faster than Sonnet and sufficient for this task.
+// Sonnet is reserved for the AI coach response where quality matters.
+const HAIKU  = 'claude-haiku-4-5-20251001';
+const SONNET = 'claude-sonnet-4-6';
 
 function makeClient(apiKey: string) {
   return new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
 }
 
-async function callClaude(apiKey: string, prompt: string): Promise<string> {
+async function callClaude(apiKey: string, prompt: string, model = SONNET): Promise<string> {
   const message = await makeClient(apiKey).messages.create({
-    model: MODEL,
+    model,
     max_tokens: 2048,
     messages: [{ role: 'user', content: prompt }],
   });
@@ -37,7 +42,7 @@ Rules:
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const text = await callClaude(apiKey, prompt);
+      const text = await callClaude(apiKey, prompt, HAIKU);
       const cleaned = text.replace(/```json\n?|\n?```/g, '').trim();
       const cards = JSON.parse(cleaned) as FlashCard[];
       if (!Array.isArray(cards) || cards.length === 0) throw new Error('Empty array');
@@ -61,7 +66,7 @@ Palestinian/Levantine dialect only. Keep it 2–5 words. Return JSON only, no ma
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const text = await callClaude(apiKey, prompt);
+      const text = await callClaude(apiKey, prompt, HAIKU);
       const cleaned = text.replace(/```json\n?|\n?```/g, '').trim();
       const phrase = JSON.parse(cleaned) as PhraseOfDay;
       if (!phrase.arabic_script) throw new Error('Invalid phrase');
