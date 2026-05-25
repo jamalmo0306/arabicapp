@@ -175,37 +175,30 @@ export default function HomeScreen() {
           {/* ── TOP STAT CARDS ── */}
           <View style={s.topStatsRow}>
 
-            {/* Streak */}
-            <View style={s.streakCard}>
-              <Text style={s.flame}>🔥</Text>
-              <Text style={s.bigNumber}>{streak}</Text>
-              <Text style={s.smallLabelDark}>day streak</Text>
-              <View style={s.dotsRow}>
-                <View style={[s.dot, s.dotActive]} />
-                <View style={s.dot} />
-                <View style={s.dot} />
-                <View style={s.dot} />
-                <View style={s.dot} />
-              </View>
-            </View>
-
-            {/* Daily Goal */}
+            {/* XP + Streak stacked */}
             <View style={s.goalCard}>
-              <View style={s.goalLeft}>
-                <Text style={s.cardTitleDark}>Total XP</Text>
-                <Text style={s.goalText}>
+              {/* Top half — XP */}
+              <View style={s.statHalfTop}>
+                <Text style={s.statHalfLabel}>⭐ Total XP</Text>
+                <Text style={s.statHalfNumber}>
                   <Text style={s.goalOrange}>{xpTotal}</Text>
-                  <Text style={s.goalText}> XP</Text>
+                  <Text style={s.statHalfUnit}> XP</Text>
                 </Text>
                 <View style={s.progressTrackLight}>
                   <View style={[s.progressFill, { width: `${Math.min(100, (xpTotal % 100))}%` }]} />
                 </View>
               </View>
-              <View style={s.goalDivider} />
-              <View style={s.goalDays}>
-                <Text style={s.calendarIcon}>🔥</Text>
-                <Text style={s.goalDaysNumber}>{streak}</Text>
-                <Text style={s.smallLabelDark}>streak</Text>
+
+              {/* Divider */}
+              <View style={s.statHDivider} />
+
+              {/* Bottom half — Streak */}
+              <View style={s.statHalfBottom}>
+                <Text style={s.statHalfLabel}>🔥 Streak</Text>
+                <View style={s.streakRow}>
+                  <Text style={s.statBigNumber}>{streak}</Text>
+                  <Text style={s.statHalfUnit}> days</Text>
+                </View>
               </View>
             </View>
 
@@ -457,50 +450,48 @@ const s = StyleSheet.create({
   // ─ Top stat cards ─
   topStatsRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
 
-  streakCard: {
-    width: 96,
-    height: 172,
-    borderRadius: 22,
-    backgroundColor: COLORS.cardLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-  },
-  flame:        { fontSize: 40, marginBottom: 2 },
-  bigNumber:    { color: COLORS.textDark, fontSize: 44, fontWeight: '800', lineHeight: 50 },
-  smallLabelDark: { color: COLORS.textDark, fontSize: 14, fontWeight: '500' },
-  dotsRow:      { flexDirection: 'row', gap: 8, marginTop: 16 },
-  dot:          { width: 12, height: 12, borderRadius: 6, backgroundColor: 'rgba(82, 72, 56, 0.28)' },
-  dotActive:    { backgroundColor: COLORS.orange },
-
   goalCard: {
-    flex: 1.3,
+    flex: 1,
     height: 172,
     borderRadius: 22,
     backgroundColor: COLORS.cardLight,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
+    flexDirection: 'column',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.28)',
+    overflow: 'hidden',
   },
-  goalLeft:        { flex: 1, paddingRight: 12 },
-  cardTitleDark:   { color: COLORS.textDark, fontSize: 16, fontWeight: '800', marginBottom: 14 },
-  goalText:        { color: COLORS.textDark, fontSize: 20, fontWeight: '700', marginBottom: 14 },
-  goalOrange:      { color: '#B86B20' },
+  statHalfTop: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
+    justifyContent: 'center',
+    gap: 6,
+  },
+  statHalfBottom: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 14,
+    justifyContent: 'center',
+    gap: 4,
+  },
+  statHDivider: { height: 1, backgroundColor: 'rgba(85,75,56,0.17)', marginHorizontal: 16 },
+  statHalfLabel:  { color: COLORS.mutedDark, fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },
+  statHalfNumber: { flexDirection: 'row', alignItems: 'baseline' },
+  statBigNumber:  { color: COLORS.textDark, fontSize: 32, fontWeight: '800', lineHeight: 36 },
+  statHalfUnit:   { color: COLORS.mutedDark, fontSize: 14, fontWeight: '600' },
+  streakRow:      { flexDirection: 'row', alignItems: 'baseline' },
+  cardTitleDark:  { color: COLORS.textDark, fontSize: 16, fontWeight: '800', marginBottom: 14 },
+  goalOrange:     { color: '#B86B20', fontSize: 32, fontWeight: '800', lineHeight: 36 },
   progressTrackLight: {
-    height: 12,
+    height: 8,
     borderRadius: 20,
     backgroundColor: 'rgba(99, 86, 65, 0.24)',
     overflow: 'hidden',
   },
-  progressFill:    { height: '100%', backgroundColor: COLORS.orange, borderRadius: 20 },
-  goalDivider:     { width: 1, height: 90, backgroundColor: 'rgba(85, 75, 56, 0.17)', marginHorizontal: 12 },
-  goalDays:        { width: 52, alignItems: 'center' },
-  calendarIcon:    { fontSize: 26, marginBottom: 4 },
-  goalDaysNumber:  { color: COLORS.textDark, fontSize: 34, fontWeight: '800', lineHeight: 40 },
+  progressFill:   { height: '100%', backgroundColor: COLORS.orange, borderRadius: 20 },
+  smallLabelDark: { color: COLORS.textDark, fontSize: 14, fontWeight: '500' },
 
   phraseCard: {
     flex: 1,
