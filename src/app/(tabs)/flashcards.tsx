@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -10,6 +10,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -38,6 +40,15 @@ const C = {
 const AGAIN_COLOR = '#C0392B';
 const HARD_COLOR  = '#E67E22';
 const GOOD_COLOR  = '#27AE60';
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
 
@@ -73,18 +84,24 @@ export default function FlashcardsScreen() {
   const [importSuccess, setImportSuccess] = useState('');
   const [importing, setImporting] = useState(false);
 
+  // Track which card IDs are loaded so markCard status updates don't reset the queue
+  const loadedCardIdsRef = useRef<string>('');
+
   useEffect(() => {
     if (!isDbReady) return;
     if (reviewWeek !== null) {
       getArchiveCardsForWeek(reviewWeek).then(cards => {
         setAllCards(cards);
-        setQueue([...cards]);
+        setQueue(shuffle([...cards]));
         setGoodIds(new Set());
         setSessionCardIndex(0);
         setSessionDone(false);
         setHistory([]);
       });
     } else {
+      const newIds = currentWeekCards.map(c => c.id).sort().join(',');
+      if (newIds === loadedCardIdsRef.current) return; // status-only update, keep queue
+      loadedCardIdsRef.current = newIds;
       setAllCards(currentWeekCards);
       setQueue([...currentWeekCards]);
       setGoodIds(new Set());
@@ -144,7 +161,7 @@ export default function FlashcardsScreen() {
   }
 
   function restart() {
-    setQueue([...allCards]);
+    setQueue(shuffle([...allCards]));
     setGoodIds(new Set());
     setSessionCardIndex(0);
     setSessionDone(false);
@@ -306,7 +323,6 @@ export default function FlashcardsScreen() {
     <View style={s.faceContainer}>
       <Text style={s.englishMain}>{currentCard.english_meaning}</Text>
       <Text style={s.situationText}>{currentCard.example_situation}</Text>
-      <Text style={s.flipHint}>Tap to flip</Text>
     </View>
   );
 
@@ -452,17 +468,23 @@ function StudyCard({
   canGoBack: boolean;
 }) {
   const [flipped, setFlipped] = useState(false);
+  const { height: screenHeight } = useWindowDimensions();
+  const cardHeight = Math.round(screenHeight * 0.46);
 
   const frontFaceStyle = frontDark ? s.cardFaceDark : s.cardFaceLight;
   const backFaceStyle  = frontDark ? s.cardFaceLight : s.cardFaceDark;
 
   return (
     <View style={s.studyArea}>
-      <Pressable onPress={() => setFlipped(f => !f)} style={s.cardContainer}>
+      <TouchableOpacity
+        activeOpacity={0.92}
+        onPress={() => setFlipped(f => !f)}
+        style={[s.cardContainer, { height: cardHeight }]}
+      >
         <View style={[s.cardFace, flipped ? backFaceStyle : frontFaceStyle]}>
           {flipped ? back : front}
         </View>
-      </Pressable>
+      </TouchableOpacity>
 
       {flipped ? (
         <View style={s.ratingRow}>
@@ -471,13 +493,15 @@ function StudyCard({
           <RatingBtn label="Good"  sub="✓" color={GOOD_COLOR}  onPress={() => onRate('good')} />
         </View>
       ) : (
-        <Text style={s.flipPrompt}>Tap card to reveal</Text>
+        <TouchableOpacity onPress={() => setFlipped(true)} style={s.showAnswerBtn} activeOpacity={0.85}>
+          <Text style={s.showAnswerText}>Show Answer</Text>
+        </TouchableOpacity>
       )}
 
       {canGoBack && (
-        <Pressable onPress={onBack} style={s.backBtn}>
+        <TouchableOpacity onPress={onBack} style={s.backBtn} activeOpacity={0.7}>
           <Text style={s.backBtnText}>← Back</Text>
-        </Pressable>
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -489,10 +513,10 @@ function RatingBtn({ label, sub, color, onPress }: {
   label: string; sub: string; color: string; onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={[s.ratingBtn, { backgroundColor: color }]}>
+    <TouchableOpacity onPress={onPress} activeOpacity={0.8} style={[s.ratingBtn, { backgroundColor: color }]}>
       <Text style={s.ratingBtnSub}>{sub}</Text>
       <Text style={s.ratingBtnLabel}>{label}</Text>
-    </Pressable>
+    </TouchableOpacity>
   );
 }
 
@@ -616,14 +640,17 @@ const s = StyleSheet.create({
 
   // Card
   studyArea: {
-    flex: 1,
     paddingHorizontal: 16,
     paddingBottom: Math.max(BottomTabInset, 96) + 20,
-    gap: 16,
+    paddingTop: 4,
+    gap: 14,
   },
-  cardContainer: { flex: 1 },
+  cardContainer: {
+    borderRadius: 22,
+    overflow: 'hidden',
+  },
   cardFace: {
-    flex: 1,
+    height: '100%',
     borderRadius: 22,
     borderWidth: 1.5,
     alignItems: 'center',
@@ -655,13 +682,6 @@ const s = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  flipHint: {
-    color: C.mutedDark,
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 8,
-    opacity: 0.7,
-  },
   backEnglish: {
     color: C.mutedLight,
     fontSize: 13,
@@ -682,11 +702,16 @@ const s = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
   },
-  flipPrompt: {
-    color: C.mutedDark,
-    fontSize: 13,
-    textAlign: 'center',
-    paddingBottom: 4,
+  showAnswerBtn: {
+    backgroundColor: C.bg,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  showAnswerText: {
+    color: C.textLight,
+    fontWeight: '700',
+    fontSize: 16,
   },
 
   // Rating buttons

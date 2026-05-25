@@ -380,6 +380,24 @@ export async function deleteArchiveCard(id: number): Promise<void> {
   await db.runAsync(`DELETE FROM flashcard_archive WHERE id = ?`, id);
 }
 
+export async function getArchiveMonths(): Promise<{ month: string; count: number }[]> {
+  const db = await getDb();
+  return db.getAllAsync<{ month: string; count: number }>(
+    `SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count
+     FROM flashcard_archive
+     GROUP BY month
+     ORDER BY month ASC`
+  );
+}
+
+export async function getArchiveCardsByMonth(month: string): Promise<FlashcardArchiveEntry[]> {
+  const db = await getDb();
+  return db.getAllAsync<FlashcardArchiveEntry>(
+    `SELECT * FROM flashcard_archive WHERE strftime('%Y-%m', created_at) = ? ORDER BY week_number ASC, id ASC`,
+    month
+  );
+}
+
 // ── Activity Log ──────────────────────────────────────────────────────────────
 
 export async function insertActivityLog(

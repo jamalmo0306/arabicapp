@@ -1,6 +1,7 @@
 // Web stub — expo-sqlite's WASM build is not bundled in this setup.
-// All reads return empty/default values; all writes are no-ops.
-// The app renders fully on web for UI preview purposes.
+// Sessions, badges, checkins, and weekly summaries are no-ops.
+// flashcard_archive and activity_log use in-memory arrays so the app
+// is fully functional within a browser session (resets on page refresh).
 
 import type {
   ActivityLog,
@@ -54,17 +55,95 @@ export async function getCheckInForWeek(_: string): Promise<WeeklyCheckIn | null
 export async function getSettings(): Promise<UserSettings> { return { ...DEFAULT_SETTINGS }; }
 export async function updateSettings(_: Partial<UserSettings>): Promise<void> {}
 
-export async function insertArchiveCards(_weekNumber: number, _topic: string, _cards: FlashCard[]): Promise<void> {}
-export async function getArchiveCardsForWeek(_weekNumber: number): Promise<FlashcardArchiveEntry[]> { return []; }
-export async function getAllArchiveWeeks(): Promise<{ week_number: number; topic: string; count: number }[]> { return []; }
-export async function markArchiveCard(_id: number, _status: 'known' | 'unknown' | 'again' | 'hard'): Promise<void> {}
-export async function getFlashcardReviewForWeek(_weekNumber: number): Promise<FlashcardReview | null> { return null; }
-export async function getKnownCardsForWeek(_weekNumber: number): Promise<FlashcardArchiveEntry[]> { return []; }
-export async function deleteArchiveCardsForWeek(_weekNumber: number): Promise<void> {}
-export async function getMostUnknownTopic(): Promise<string | null> { return null; }
-export async function deleteArchiveCard(_id: number): Promise<void> {}
+// ── In-memory flashcard archive ───────────────────────────────────────────────
 
-// In-memory activity log so the chart reflects logged sessions on web
+let _archiveCards: FlashcardArchiveEntry[] = [];
+let _nextArchiveId = 1;
+
+export async function insertArchiveCards(weekNumber: number, topic: string, cards: FlashCard[]): Promise<void> {
+  const now = new Date().toISOString();
+  for (const c of cards) {
+    _archiveCards.push({
+      id: _nextArchiveId++,
+      week_number: weekNumber,
+      topic,
+      arabic_script: c.arabic_script,
+      transliteration: c.transliteration,
+      english_meaning: c.english_meaning,
+      example_situation: c.example_situation,
+      status: 'unknown',
+      created_at: now,
+    });
+  }
+}
+
+export async function getArchiveCardsForWeek(weekNumber: number): Promise<FlashcardArchiveEntry[]> {
+  return _archiveCards.filter(c => c.week_number === weekNumber).sort((a, b) => a.id - b.id);
+}
+
+export async function getAllArchiveWeeks(): Promise<{ week_number: number; topic: string; count: number }[]> {
+  const map = new Map<number, { topic: string; count: number }>();
+  for (const c of _archiveCards) {
+    const existing = map.get(c.week_number);
+    if (existing) { existing.count++; }
+    else { map.set(c.week_number, { topic: c.topic, count: 1 }); }
+  }
+  return Array.from(map.entries())
+    .map(([week_number, { topic, count }]) => ({ week_number, topic, count }))
+    .sort((a, b) => a.week_number - b.week_number);
+}
+
+export async function markArchiveCard(id: number, status: 'known' | 'unknown' | 'again' | 'hard'): Promise<void> {
+  const card = _archiveCards.find(c => c.id === id);
+  if (card) card.status = status;
+}
+
+export async function getFlashcardReviewForWeek(_weekNumber: number): Promise<FlashcardReview | null> { return null; }
+
+export async function getKnownCardsForWeek(weekNumber: number): Promise<FlashcardArchiveEntry[]> {
+  return _archiveCards.filter(c => c.week_number === weekNumber && c.status === 'known');
+}
+
+export async function deleteArchiveCardsForWeek(weekNumber: number): Promise<void> {
+  _archiveCards = _archiveCards.filter(c => c.week_number !== weekNumber);
+}
+
+export async function getMostUnknownTopic(): Promise<string | null> {
+  const counts = new Map<string, number>();
+  for (const c of _archiveCards) {
+    if (c.status === 'unknown') counts.set(c.topic, (counts.get(c.topic) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [topic, count] of counts) {
+    if (count > bestCount) { best = topic; bestCount = count; }
+  }
+  return best;
+}
+
+export async function deleteArchiveCard(id: number): Promise<void> {
+  _archiveCards = _archiveCards.filter(c => c.id !== id);
+}
+
+export async function getArchiveMonths(): Promise<{ month: string; count: number }[]> {
+  const map = new Map<string, number>();
+  for (const c of _archiveCards) {
+    const month = c.created_at.slice(0, 7); // YYYY-MM
+    map.set(month, (map.get(month) ?? 0) + 1);
+  }
+  return Array.from(map.entries())
+    .map(([month, count]) => ({ month, count }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+}
+
+export async function getArchiveCardsByMonth(month: string): Promise<FlashcardArchiveEntry[]> {
+  return _archiveCards
+    .filter(c => c.created_at.startsWith(month))
+    .sort((a, b) => a.week_number - b.week_number || a.id - b.id);
+}
+
+// ── In-memory activity log ────────────────────────────────────────────────────
+
 let _activityLogs: ActivityLog[] = [];
 let _nextLogId = 1;
 

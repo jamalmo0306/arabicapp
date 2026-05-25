@@ -62,6 +62,7 @@ interface AppContextValue {
   pendingCheckIn: boolean;
   currentWeekCards: FlashcardArchiveEntry[];
   weekCompleteInfo: { completedWeek: number } | null;
+  weekActivityDates: string[];
 
   logSession(params: {
     minutes: number;
@@ -116,6 +117,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [pendingCheckIn, setPendingCheckIn] = useState(false);
   const [currentWeekCards, setCurrentWeekCards] = useState<FlashcardArchiveEntry[]>([]);
   const [weekCompleteInfo, setWeekCompleteInfo] = useState<{ completedWeek: number } | null>(null);
+  const [weekActivityDates, setWeekActivityDates] = useState<string[]>([]);
 
   const confettiRef = useRef<{ start: () => void } | null>(null);
 
@@ -126,7 +128,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   async function loadState() {
-    const [s, badges] = await Promise.all([getSettings(), getAllBadges()]);
+    let [s, badges] = await Promise.all([getSettings(), getAllBadges()]);
+    // Reset streak if last session was more than 1 day ago
+    if (s.last_session_date) {
+      const today = toDateString();
+      const diffDays = Math.round(
+        (new Date(today).getTime() - new Date(s.last_session_date).getTime()) / 86_400_000
+      );
+      if (diffDays > 1) {
+        await updateSettings({ streak_count: 0 });
+        s = { ...s, streak_count: 0 };
+      }
+    }
     setSettings(s);
     setStreak(s.streak_count);
     setXpTotal(s.xp_total);
@@ -189,6 +202,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const cards = await getArchiveCardsForWeek(effectiveWeek);
     setCurrentWeekCards(cards);
+
+    const weekLogs = await getActivityLogByWeek(effectiveWeek);
+    setWeekActivityDates([...new Set(weekLogs.map(l => l.date))]);
 
     setIsDbReady(true);
   }
@@ -306,6 +322,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           week_number: currentSettings2.current_week,
           created_at: new Date().toISOString(),
         });
+        const weekLogs = await getActivityLogByWeek(currentSettings2.current_week);
+        setWeekActivityDates([...new Set(weekLogs.map(l => l.date))]);
       }
 
       const [totalMinutes, totalBatches, tutorCount, allBadges] =
@@ -412,6 +430,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const patchSettings = useCallback(async (patch: Partial<UserSettings>) => {
     await updateSettings(patch);
     setSettings(prev => ({ ...prev, ...patch }));
+    if ('current_week' in patch && patch.current_week !== undefined) {
+      const [cards, weekLogs] = await Promise.all([
+        getArchiveCardsForWeek(patch.current_week),
+        getActivityLogByWeek(patch.current_week),
+      ]);
+      setCurrentWeekCards(cards);
+      setWeekActivityDates([...new Set(weekLogs.map(l => l.date))]);
+    }
   }, []);
 
   return (
@@ -425,6 +451,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         pendingCheckIn,
         currentWeekCards,
         weekCompleteInfo,
+        weekActivityDates,
         logSession,
         saveFlashcardBatch,
         saveCheckIn,

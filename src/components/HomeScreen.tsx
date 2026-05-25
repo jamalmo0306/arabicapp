@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   Dimensions,
   Image,
@@ -16,8 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, Stack } from 'expo-router';
 import { useAppContext } from '@/context/app-context';
-import { PILLARS } from '@/lib/xp';
-import type { PillarKey, PhraseOfDay } from '@/context/types';
+import type { PhraseOfDay } from '@/context/types';
 
 
 function getMilestone(week: number): string {
@@ -51,13 +51,6 @@ const COLORS = {
 
 const MILESTONE_GOAL = 10;
 
-const PILLAR_SUBTITLES: Record<PillarKey, string> = {
-  flashcards: 'Review &\npractice',
-  structured: 'Lessons &\ngrammar',
-  speaking:   'Talk &\nget better',
-  listening:  'Train\nyour ear',
-};
-
 // ── ProgressCard ───────────────────────────────────────────────────────────────
 type ProgressCardProps = {
   icon: string;
@@ -66,11 +59,11 @@ type ProgressCardProps = {
   suffix?: string;
   subtitle: string;
   percent?: string;
-  dots?: boolean;
+  dotStates?: boolean[];
   cardStyle?: object;
 };
 
-function ProgressCard({ icon, title, value, suffix, subtitle, percent, dots, cardStyle }: ProgressCardProps) {
+function ProgressCard({ icon, title, value, suffix, subtitle, percent, dotStates, cardStyle }: ProgressCardProps) {
   return (
     <View style={[s.progressCardBase, cardStyle]}>
       <Text style={s.progressTitle}>{icon} {title}</Text>
@@ -81,10 +74,10 @@ function ProgressCard({ icon, title, value, suffix, subtitle, percent, dots, car
             {suffix ? <Text style={s.progressSuffix}> {suffix}</Text> : null}
           </View>
           <Text style={s.progressSubtitle}>{subtitle}</Text>
-          {dots ? (
+          {dotStates ? (
             <View style={s.darkDotsRow}>
-              {Array.from({ length: 6 }).map((_, i) => (
-                <View key={i} style={s.darkDot} />
+              {dotStates.map((active, i) => (
+                <View key={i} style={[s.darkDot, active && s.darkDotActive]} />
               ))}
             </View>
           ) : null}
@@ -106,15 +99,11 @@ export default function HomeScreen() {
     streak,
     xpTotal,
     currentWeekCards,
-    logSession,
     settings,
     weekCompleteInfo,
     dismissWeekComplete,
+    weekActivityDates,
   } = useAppContext();
-
-  const [checkedPillars, setCheckedPillars] = useState<Set<PillarKey>>(new Set());
-  const [saving, setSaving] = useState(false);
-  const [justLogged, setJustLogged] = useState(false);
 
   // Phrase of the day: read from persisted settings first, fall back to current week cards
   const phraseCard = useMemo<PhraseOfDay | null>(() => {
@@ -126,26 +115,20 @@ export default function HomeScreen() {
     return { arabic_script: c.arabic_script, transliteration: c.transliteration, english_meaning: c.english_meaning };
   }, [settings.phrase_of_day, currentWeekCards]);
 
-  function togglePillar(key: PillarKey) {
-    setCheckedPillars(prev => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
+  // 7 dots = Mon–Sun of the current calendar week, filled if that date has activity this program week
+  const streakDots = useMemo<boolean[]>(() => {
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0=Sun
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() + mondayOffset);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const dateStr = d.toISOString().slice(0, 10);
+      return weekActivityDates.includes(dateStr);
     });
-  }
-
-  async function handleLogSession() {
-    if (checkedPillars.size === 0 || saving) return;
-    setSaving(true);
-    try {
-      await logSession({ minutes: 0, pillars: Array.from(checkedPillars) });
-      setCheckedPillars(new Set());
-      setJustLogged(true);
-      setTimeout(() => setJustLogged(false), 2000);
-    } finally {
-      setSaving(false);
-    }
-  }
+  }, [weekActivityDates]);
 
   const camelSize = dynWidth * 0.62;
 
@@ -161,65 +144,22 @@ export default function HomeScreen() {
           showsVerticalScrollIndicator={false}
         >
 
-          {/* ── HEADER ── */}
-          <View style={s.header}>
-            <View style={s.logoRow}>
-              <Text style={s.logoIcon}>🌿</Text>
-              <Text style={s.appTitle}>Arabic Hub</Text>
-            </View>
-            <View style={s.xpPill}>
-              <Text style={s.xpText}>⭐ {xpTotal} XP</Text>
-            </View>
-          </View>
-
-          {/* ── TOP STAT CARDS ── */}
-          <View style={s.topStatsRow}>
-
-            {/* XP + Streak stacked */}
-            <View style={s.goalCard}>
-              {/* Top half — XP */}
-              <View style={s.statHalfTop}>
-                <Text style={s.statHalfLabel}>⭐ Total XP</Text>
-                <Text style={s.statHalfNumber}>
-                  <Text style={s.goalOrange}>{xpTotal}</Text>
-                  <Text style={s.statHalfUnit}> XP</Text>
-                </Text>
-                <View style={s.progressTrackLight}>
-                  <View style={[s.progressFill, { width: `${Math.min(100, (xpTotal % 100))}%` }]} />
-                </View>
-              </View>
-
-              {/* Divider */}
-              <View style={s.statHDivider} />
-
-              {/* Bottom half — Streak */}
-              <View style={s.statHalfBottom}>
-                <Text style={s.statHalfLabel}>🔥 Streak</Text>
-                <View style={s.streakRow}>
-                  <Text style={s.statBigNumber}>{streak}</Text>
-                  <Text style={s.statHalfUnit}> days</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Phrase of the Day */}
-            <View style={s.phraseCard}>
-              <Text style={s.cardTitleDark}>💬 Phrase of the Day</Text>
-              {phraseCard ? (
-                <>
-                  <Text style={s.arabicText}>{phraseCard.arabic_script}</Text>
-                  <Text style={s.translitText}>{phraseCard.transliteration}</Text>
-                  <Text style={s.meaningText}>{phraseCard.english_meaning}</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={s.arabicText}>كيف حالك؟</Text>
-                  <Text style={s.translitText}>Kayf halak?</Text>
-                  <Text style={s.meaningText}>How are you?</Text>
-                </>
-              )}
-            </View>
-
+          {/* ── PHRASE OF THE DAY (replaces header) ── */}
+          <View style={s.phraseTopCard}>
+            <Text style={s.phraseTopLabel}>💬 Phrase of the Day</Text>
+            {phraseCard ? (
+              <>
+                <Text style={s.phraseTopArabic}>{phraseCard.arabic_script}</Text>
+                <Text style={s.phraseTopTranslit}>{phraseCard.transliteration}</Text>
+                <Text style={s.phraseTopEng}>{phraseCard.english_meaning}</Text>
+              </>
+            ) : (
+              <>
+                <Text style={s.phraseTopArabic}>كيف حالك؟</Text>
+                <Text style={s.phraseTopTranslit}>Kayf halak?</Text>
+                <Text style={s.phraseTopEng}>How are you?</Text>
+              </>
+            )}
           </View>
 
           {/* ── HERO ── */}
@@ -229,7 +169,7 @@ export default function HomeScreen() {
             <View style={s.heroBg}>
               <Image
                 source={require('../../desertbackgroud.png')}
-                style={{ width: dynWidth, height: 760 }}
+                style={{ width: dynWidth, height: 400 }}
                 resizeMode="cover"
               />
             </View>
@@ -241,76 +181,25 @@ export default function HomeScreen() {
               resizeMode="contain"
             />
 
-            {/* Layer 3 — pillar buttons: tap to mark complete (turns gold) */}
-            <View style={s.heroButtonRow}>
-              {PILLARS.map(p => {
-                const checked = checkedPillars.has(p.key);
-                return (
-                  <TouchableOpacity
-                    key={p.key}
-                    activeOpacity={0.82}
-                    style={[s.heroButton, checked && s.heroButtonActive]}
-                    onPress={() => togglePillar(p.key)}
-                  >
-                    <Text style={s.heroButtonIcon}>{p.emoji}</Text>
-                    <Text style={[s.heroButtonTitle, checked && s.heroButtonTitleActive]}>
-                      {p.key === 'structured' ? 'Structured\nStudy' : p.label}
-                    </Text>
-                    <Text style={s.heroButtonSub}>{PILLAR_SUBTITLES[p.key]}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-              {/* Resources navigates — not a loggable pillar */}
-              <TouchableOpacity
-                activeOpacity={0.82}
-                style={s.heroButton}
-                onPress={() => router.push('/(tabs)/resources')}
-              >
-                <Text style={s.heroButtonIcon}>📚</Text>
-                <Text style={s.heroButtonTitle}>Resources</Text>
-                <Text style={s.heroButtonSub}>Guides &{'\n'}tools</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* ── PROGRESS SECTION ── */}
-
-          {/* Study Streak + Next Milestone */}
-          <View style={s.progressRow}>
-            <ProgressCard
-              icon="🔥" title="Study Streak"
-              value={`${streak}`}
-              subtitle="days in a row" dots
-              cardStyle={s.progressCardHalf}
+            {/* Layer 3 — gradient fades */}
+            <LinearGradient
+              colors={['#CBB77C', 'transparent']}
+              style={s.heroGradientTop}
+              pointerEvents="none"
+            />
+            <LinearGradient
+              colors={['transparent', '#CBB77C']}
+              style={s.heroGradientBottom}
+              pointerEvents="none"
             />
 
-            {/* Milestone card */}
-            <View style={[s.progressCardHalf, s.progressCardBase]}>
-              <View style={s.milestoneTop}>
-                <Text style={s.progressTitle}>🏆 Next Milestone</Text>
-                <Text style={s.lockIcon}>🔒</Text>
-              </View>
-              <Text style={s.milestoneMain}>{getMilestone(settings.current_week)}</Text>
-              <Text style={s.milestoneSub}>+25 XP</Text>
-              <View style={s.milestoneBottom}>
-                <View style={s.progressTrackDark}>
-                  <View
-                    style={[
-                      s.progressFillDark,
-                      { width: `${Math.min(100, (currentWeekCards.filter(c => c.status === 'known').length / MILESTONE_GOAL) * 100)}%` },
-                    ]}
-                  />
-                </View>
-                <Text style={s.milestoneCount}>{currentWeekCards.filter(c => c.status === 'known').length} / {MILESTONE_GOAL}</Text>
-              </View>
-            </View>
           </View>
 
-          {/* ── QUICK LAUNCH ── */}
-          <View style={s.quickLaunchRow}>
+          {/* ── QUICK LAUNCH ROW ── */}
+          <View style={s.quickRow}>
             <TouchableOpacity
               activeOpacity={0.82}
-              style={s.quickCard}
+              style={[s.progressCardBase, s.quickCard]}
               onPress={() =>
                 Linking.canOpenURL('duolingo://').then(supported =>
                   Linking.openURL(supported ? 'duolingo://' : 'https://www.duolingo.com')
@@ -324,7 +213,7 @@ export default function HomeScreen() {
 
             <TouchableOpacity
               activeOpacity={0.82}
-              style={s.quickCard}
+              style={[s.progressCardBase, s.quickCard]}
               onPress={() =>
                 Linking.canOpenURL('lingq://').then(supported =>
                   Linking.openURL(supported ? 'lingq://' : 'https://www.lingq.com')
@@ -338,13 +227,56 @@ export default function HomeScreen() {
 
             <TouchableOpacity
               activeOpacity={0.82}
-              style={s.quickCard}
+              style={[s.progressCardBase, s.quickCard]}
               onPress={() => Linking.openURL(settings.resource_url)}
             >
               <Text style={s.quickEmoji}>🎬</Text>
               <Text style={s.quickTitle}>{settings.resource_title}</Text>
               <Text style={s.quickSub}>{settings.resource_subtitle}</Text>
             </TouchableOpacity>
+          </View>
+
+          {/* ── PROGRESS SECTION ── */}
+
+          {/* Study Streak + Flashcard Progress */}
+          <View style={s.progressRow}>
+            <ProgressCard
+              icon="🔥" title="Study Streak"
+              value={`${streak}`}
+              subtitle="days in a row"
+              dotStates={streakDots}
+              cardStyle={s.progressCardHalf}
+            />
+
+            {/* Flashcard progress card — Again / Hard / Good */}
+            <View style={[s.progressCardHalf, s.progressCardBase]}>
+              <Text style={s.progressTitle}>🃏 Week {settings.current_week} Cards</Text>
+              <View style={s.fcStatsRow}>
+                <View style={s.fcStat}>
+                  <Text style={[s.fcStatNum, { color: '#C0392B' }]}>
+                    {currentWeekCards.filter(c => c.status === 'again').length}
+                  </Text>
+                  <Text style={s.fcStatLabel}>Again</Text>
+                </View>
+                <View style={s.fcDivider} />
+                <View style={s.fcStat}>
+                  <Text style={[s.fcStatNum, { color: '#E67E22' }]}>
+                    {currentWeekCards.filter(c => c.status === 'hard').length}
+                  </Text>
+                  <Text style={s.fcStatLabel}>Hard</Text>
+                </View>
+                <View style={s.fcDivider} />
+                <View style={s.fcStat}>
+                  <Text style={[s.fcStatNum, { color: '#27AE60' }]}>
+                    {currentWeekCards.filter(c => c.status === 'known').length}
+                  </Text>
+                  <Text style={s.fcStatLabel}>Good</Text>
+                </View>
+              </View>
+              <Text style={s.fcTotal}>
+                {currentWeekCards.length} cards total
+              </Text>
+            </View>
           </View>
 
           {/* ── WEEKLY CHECK-IN ── */}
@@ -363,19 +295,6 @@ export default function HomeScreen() {
 
         </ScrollView>
 
-        {/* Floating log button — appears when any pillar is checked */}
-        {(checkedPillars.size > 0 || justLogged) && (
-          <TouchableOpacity
-            style={[s.logBtn, justLogged && s.logBtnDone]}
-            onPress={handleLogSession}
-            disabled={saving || justLogged}
-            activeOpacity={0.85}
-          >
-            <Text style={s.logBtnText}>
-              {justLogged ? '✓ Logged!' : saving ? 'Logging…' : `✓ Log ${checkedPillars.size} pillar${checkedPillars.size > 1 ? 's' : ''}`}
-            </Text>
-          </TouchableOpacity>
-        )}
       </SafeAreaView>
 
       {/* Week complete modal */}
@@ -412,182 +331,66 @@ const s = StyleSheet.create({
 
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 20,
+    paddingTop: 8,
     paddingBottom: 140,   // clears the floating bottom nav
   },
 
-  // ─ Header ─
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  logoRow: { flexDirection: 'row', alignItems: 'center' },
-  logoIcon: { fontSize: 38, marginRight: 10 },
-  appTitle: {
-    color: COLORS.textDark,
-    fontSize: 31,
-    fontWeight: '800',
-    letterSpacing: 0.1,
-  },
-  xpPill: {
-    minWidth: 104,
-    height: 52,
-    paddingHorizontal: 18,
-    borderRadius: 26,
-    backgroundColor: COLORS.creamSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  xpText: { color: COLORS.textDark, fontSize: 18, fontWeight: '800' },
-
-  // ─ Top stat cards ─
-  topStatsRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
-
-  goalCard: {
-    flex: 1,
-    height: 172,
-    borderRadius: 22,
-    backgroundColor: COLORS.cardLight,
-    flexDirection: 'column',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    overflow: 'hidden',
-  },
-  statHalfTop: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 10,
-    justifyContent: 'center',
-    gap: 6,
-  },
-  statHalfBottom: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 14,
-    justifyContent: 'center',
-    gap: 4,
-  },
-  statHDivider: { height: 1, backgroundColor: 'rgba(85,75,56,0.17)', marginHorizontal: 16 },
-  statHalfLabel:  { color: COLORS.mutedDark, fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },
-  statHalfNumber: { flexDirection: 'row', alignItems: 'baseline' },
-  statBigNumber:  { color: COLORS.textDark, fontSize: 32, fontWeight: '800', lineHeight: 36 },
-  statHalfUnit:   { color: COLORS.mutedDark, fontSize: 14, fontWeight: '600' },
-  streakRow:      { flexDirection: 'row', alignItems: 'baseline' },
-  cardTitleDark:  { color: COLORS.textDark, fontSize: 16, fontWeight: '800', marginBottom: 14 },
-  goalOrange:     { color: '#B86B20', fontSize: 32, fontWeight: '800', lineHeight: 36 },
-  progressTrackLight: {
-    height: 8,
+  // ─ Phrase of the Day (top card, replaces header) ─
+  phraseTopCard: {
     borderRadius: 20,
-    backgroundColor: 'rgba(99, 86, 65, 0.24)',
-    overflow: 'hidden',
-  },
-  progressFill:   { height: '100%', backgroundColor: COLORS.orange, borderRadius: 20 },
-  smallLabelDark: { color: COLORS.textDark, fontSize: 14, fontWeight: '500' },
-
-  phraseCard: {
-    flex: 1,
-    height: 172,
-    borderRadius: 22,
     backgroundColor: COLORS.cardLight,
-    paddingVertical: 20,
-    paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    justifyContent: 'center',
+    borderColor: 'rgba(255,255,255,0.30)',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    marginBottom: 6,
+    alignItems: 'center',
+    gap: 3,
   },
-  arabicText:  { color: COLORS.textDark, textAlign: 'center', fontSize: 22, fontWeight: '700', writingDirection: 'rtl', marginTop: 6 },
-  translitText: { color: COLORS.textDark, textAlign: 'center', fontSize: 15, marginTop: 6 },
-  meaningText:  { color: COLORS.mutedDark, textAlign: 'center', fontSize: 14, marginTop: 2 },
+  phraseTopLabel:   { color: COLORS.mutedDark, fontSize: 12, fontWeight: '700', letterSpacing: 0.3, marginBottom: 2 },
+  phraseTopArabic:  { color: COLORS.textDark, fontSize: 24, fontWeight: '700', textAlign: 'center', writingDirection: 'rtl' },
+  phraseTopTranslit:{ color: COLORS.textDark, fontSize: 14, textAlign: 'center' },
+  phraseTopEng:     { color: COLORS.mutedDark, fontSize: 13, textAlign: 'center' },
 
   // ─ Hero ─
   hero: {
-    width: '100%',
-    height: 760,
-    borderRadius: 24,
-    overflow: 'hidden',           // clips the 2× wide panning background
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(245, 205, 112, 0.18)',
-    backgroundColor: '#E5A749',   // warm fallback if image fails to load
+    height: 400,
+    overflow: 'hidden',
+    marginBottom: 0,
+    marginHorizontal: -16,        // bleed past scrollContent padding to hit screen edges
+    backgroundColor: '#D4A84B',
   },
-  // Panning background layer — 2× wide, translateX is driven by bgPanStyle
   heroBg: {
     position: 'absolute',
     top: 0,
     left: 0,
-    height: 760,
+    height: 400,
   },
-  // Camel: width & height come from inline (reactive). Position is percentage-based
-  // so it stays at the same spot in the hero no matter the screen width.
   camelSprite: {
     position: 'absolute',
     alignSelf: 'center',
-    bottom: '27%',   // 27% of 760 px ≈ 205 px — sits above the button row
+    bottom: '18%',
   },
-
-  heroButtonRow: {
+  heroGradientTop: {
     position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 28,
-    height: 160,
-    flexDirection: 'row',
-    gap: 8,
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 100,
   },
-  heroButton: {
-    flex: 1,
-    borderRadius: 14,
-    backgroundColor: 'rgba(74, 44, 23, 0.72)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 221, 145, 0.22)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-    paddingVertical: 10,
-  },
-  heroButtonIcon:  { fontSize: 28, marginBottom: 8 },
-  heroButtonTitle: { color: COLORS.gold, fontSize: 13, fontWeight: '800', textAlign: 'center', lineHeight: 16 },
-  heroButtonTitleActive: { color: COLORS.gold },
-  heroButtonSub:   { color: '#F1DEBD', fontSize: 11, textAlign: 'center', lineHeight: 15, marginTop: 4 },
-  heroButtonActive: {
-    backgroundColor: 'rgba(247, 198, 83, 0.30)',
-    borderColor: COLORS.gold,
-    borderWidth: 1.5,
-  },
-
-  // ─ Floating log button ─
-  logBtn: {
+  heroGradientBottom: {
     position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 114,   // clears the 80px nav + 16px gap + 18px buffer
-    backgroundColor: COLORS.olive,
-    borderRadius: 20,
-    paddingVertical: 18,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.32,
-    shadowRadius: 14,
-    elevation: 10,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 140,
   },
-  logBtnDone: { backgroundColor: COLORS.oliveDark },
-  logBtnText: { color: '#15150F', fontSize: 17, fontWeight: '800', letterSpacing: 0.3 },
 
   // ─ Progress rows ─
   progressRow: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 10,
+    marginBottom: 6,
   },
   // Shared base card style (used by ProgressCard and Milestone)
   progressCardBase: {
@@ -625,42 +428,34 @@ const s = StyleSheet.create({
   percentText:  { color: COLORS.olive, fontSize: 15, fontWeight: '800' },
   darkDotsRow:  { flexDirection: 'row', gap: 7, marginTop: 14 },
   darkDot:      { width: 12, height: 12, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.13)' },
+  darkDotActive:{ backgroundColor: COLORS.gold },
 
-  // Milestone section
-  milestoneTop:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  lockIcon:      { fontSize: 16, opacity: 0.75 },
-  milestoneMain: { color: '#F7E8D0', fontSize: 22, fontWeight: '600', marginTop: 4 },
-  milestoneSub:  { color: COLORS.mutedLight, fontSize: 15, marginTop: 6 },
-  milestoneBottom: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  progressTrackDark: {
-    flex: 1,
-    height: 12,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.13)',
-    overflow: 'hidden',
-  },
-  progressFillDark: { height: '100%', backgroundColor: COLORS.olive, borderRadius: 20 },
-  milestoneCount: { color: '#F6EBD1', fontSize: 15, fontWeight: '700', marginLeft: 14 },
-
-  // Quick-launch cards
-  quickLaunchRow: {
+  // ─ Quick launch row (below hero) ─
+  quickRow: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 16,
+    marginBottom: 6,
   },
   quickCard: {
     flex: 1,
-    backgroundColor: COLORS.blackGlass,
-    borderRadius: 16,
-    padding: 14,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 14,
     gap: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(218,168,64,0.18)',
+    minHeight: 0,
   },
-  quickEmoji: { fontSize: 28 },
-  quickTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '700', textAlign: 'center' },
-  quickSub:   { color: COLORS.mutedLight, fontSize: 11, textAlign: 'center', lineHeight: 15 },
+  quickEmoji: { fontSize: 24 },
+  quickTitle: { color: COLORS.gold, fontSize: 12, fontWeight: '800', textAlign: 'center', lineHeight: 15 },
+  quickSub:   { color: COLORS.mutedLight, fontSize: 10, textAlign: 'center', lineHeight: 13 },
+
+  // Flashcard progress card (replaces milestone)
+  fcStatsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, flex: 1 },
+  fcStat:     { flex: 1, alignItems: 'center', gap: 4 },
+  fcStatNum:  { fontSize: 28, fontWeight: '800', lineHeight: 32 },
+  fcStatLabel:{ color: COLORS.mutedLight, fontSize: 11, fontWeight: '600' },
+  fcDivider:  { width: 1, height: 36, backgroundColor: 'rgba(255,255,255,0.10)' },
+  fcTotal:    { color: COLORS.mutedLight, fontSize: 11, marginTop: 10, textAlign: 'center' },
 
   // Weekly check-in button
   checkInBtn: {
@@ -672,7 +467,7 @@ const s = StyleSheet.create({
     borderColor: 'rgba(155,199,109,0.35)',
     paddingHorizontal: 18,
     paddingVertical: 16,
-    marginTop: 10,
+    marginTop: 6,
     gap: 14,
   },
   checkInEmoji: { fontSize: 26 },

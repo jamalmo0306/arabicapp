@@ -35,7 +35,7 @@ const C = {
   btnBorder:   'rgba(255, 213, 121, 0.20)',
 };
 
-const WEEK_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
+const WEEK_OPTIONS = Array.from({ length: 52 }, (_, i) => i + 1);
 
 const DARK_MODE_OPTIONS: { value: UserSettings['dark_mode']; icon: string; label: string }[] = [
   { value: 'system', icon: '⚙️', label: 'System' },
@@ -120,15 +120,15 @@ export default function SettingsScreen() {
           {/* ── CURRENT WEEK ── */}
           <View style={s.card}>
             <View style={s.sectionHeaderRow}>
-              <Text style={s.sectionLabel}>12-WEEK PROGRAM</Text>
+              <Text style={s.sectionLabel}>52-WEEK PROGRAM</Text>
               <View style={s.weekPill}>
-                <Text style={s.weekPillText}>Week {settings.current_week} of 12</Text>
+                <Text style={s.weekPillText}>Week {settings.current_week} of 52</Text>
               </View>
             </View>
 
             {/* Progress bar */}
             <View style={s.weekProgressTrack}>
-              <View style={[s.weekProgressFill, { width: `${(settings.current_week / 12) * 100}%` }]} />
+              <View style={[s.weekProgressFill, { width: `${(settings.current_week / 52) * 100}%` }]} />
             </View>
 
             {/* Week grid */}
