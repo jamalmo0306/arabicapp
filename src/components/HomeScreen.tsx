@@ -354,6 +354,20 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* ── WEEKLY CHECK-IN ── */}
+          <TouchableOpacity
+            activeOpacity={0.82}
+            style={s.checkInBtn}
+            onPress={() => router.push('/(modal)/checkin')}
+          >
+            <Text style={s.checkInEmoji}>📋</Text>
+            <View style={s.checkInText}>
+              <Text style={s.checkInTitle}>Weekly Check-In</Text>
+              <Text style={s.checkInSub}>Track your week in 60 seconds</Text>
+            </View>
+            <Text style={s.checkInArrow}>→</Text>
+          </TouchableOpacity>
+
         </ScrollView>
 
         {/* Floating log button — appears when any pillar is checked */}
@@ -656,6 +670,25 @@ const s = StyleSheet.create({
   quickEmoji: { fontSize: 28 },
   quickTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '700', textAlign: 'center' },
   quickSub:   { color: COLORS.mutedLight, fontSize: 11, textAlign: 'center', lineHeight: 15 },
+
+  // Weekly check-in button
+  checkInBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.blackGlass,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(155,199,109,0.35)',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    marginTop: 10,
+    gap: 14,
+  },
+  checkInEmoji: { fontSize: 26 },
+  checkInText:  { flex: 1, gap: 3 },
+  checkInTitle: { color: COLORS.olive, fontSize: 15, fontWeight: '800' },
+  checkInSub:   { color: COLORS.mutedLight, fontSize: 12 },
+  checkInArrow: { color: COLORS.olive, fontSize: 20, fontWeight: '700' },
 
   // Week complete modal
   modalOverlay: {

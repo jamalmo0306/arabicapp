@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 
 import type {
+  ActivityLog,
   Badge,
   BadgeKey,
   FlashCard,
@@ -9,6 +10,7 @@ import type {
   Session,
   UserSettings,
   WeeklyCheckIn,
+  WeeklySummary,
 } from '@/context/types';
 
 let _db: SQLite.SQLiteDatabase | null = null;
@@ -90,6 +92,27 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       english_meaning TEXT NOT NULL,
       example_situation TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'unknown',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      activity_type TEXT NOT NULL,
+      minutes INTEGER,
+      notes TEXT,
+      week_number INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS weekly_summary (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      week_number INTEGER NOT NULL UNIQUE,
+      week_start_date TEXT NOT NULL,
+      total_activities INTEGER NOT NULL DEFAULT 0,
+      total_minutes INTEGER NOT NULL DEFAULT 0,
+      most_used_activity TEXT NOT NULL DEFAULT '',
+      notes TEXT,
       created_at TEXT NOT NULL
     );
   `);
@@ -307,7 +330,7 @@ export async function getAllArchiveWeeks(): Promise<{ week_number: number; topic
 
 export async function markArchiveCard(
   id: number,
-  status: 'known' | 'unknown'
+  status: 'known' | 'unknown' | 'again' | 'hard'
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
@@ -350,4 +373,83 @@ export async function getMostUnknownTopic(): Promise<string | null> {
      LIMIT 1`
   );
   return row?.topic ?? null;
+}
+
+export async function deleteArchiveCard(id: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`DELETE FROM flashcard_archive WHERE id = ?`, id);
+}
+
+// ── Activity Log ──────────────────────────────────────────────────────────────
+
+export async function insertActivityLog(
+  entry: Omit<ActivityLog, 'id'>
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO activity_log (date, activity_type, minutes, notes, week_number, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    entry.date,
+    entry.activity_type,
+    entry.minutes ?? null,
+    entry.notes ?? null,
+    entry.week_number,
+    entry.created_at
+  );
+}
+
+export async function getActivityLogInRange(
+  startDate: string,
+  endDate: string
+): Promise<ActivityLog[]> {
+  const db = await getDb();
+  return db.getAllAsync<ActivityLog>(
+    `SELECT * FROM activity_log WHERE date >= ? AND date <= ? ORDER BY date DESC, id DESC`,
+    startDate,
+    endDate
+  );
+}
+
+export async function getActivityLogByWeek(
+  weekNumber: number
+): Promise<ActivityLog[]> {
+  const db = await getDb();
+  return db.getAllAsync<ActivityLog>(
+    `SELECT * FROM activity_log WHERE week_number = ? ORDER BY date DESC, id DESC`,
+    weekNumber
+  );
+}
+
+export async function getAllActivityLog(): Promise<ActivityLog[]> {
+  const db = await getDb();
+  return db.getAllAsync<ActivityLog>(
+    `SELECT * FROM activity_log ORDER BY date DESC, id DESC`
+  );
+}
+
+// ── Weekly Summary ────────────────────────────────────────────────────────────
+
+export async function insertOrUpdateWeeklySummary(
+  summary: Omit<WeeklySummary, 'id'>
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO weekly_summary
+     (week_number, week_start_date, total_activities, total_minutes, most_used_activity, notes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    summary.week_number,
+    summary.week_start_date,
+    summary.total_activities,
+    summary.total_minutes,
+    summary.most_used_activity,
+    summary.notes ?? null,
+    summary.created_at
+  );
+}
+
+export async function getAllWeeklySummaries(): Promise<WeeklySummary[]> {
+  const db = await getDb();
+  return db.getAllAsync<WeeklySummary>(
+    `SELECT * FROM weekly_summary ORDER BY week_number DESC`
+  );
 }

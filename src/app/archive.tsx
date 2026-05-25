@@ -2,39 +2,61 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import type { FlashcardArchiveEntry } from '@/context/types';
-import { getAllArchiveWeeks, getArchiveCardsForWeek } from '@/lib/db';
-import { useTheme } from '@/hooks/use-theme';
+import { deleteArchiveCard, getAllArchiveWeeks, getArchiveCardsForWeek } from '@/lib/db';
 
-interface WeekSummary {
-  week_number: number;
-  topic: string;
-  count: number;
+const C = {
+  bg:         '#15150F',
+  sand:       '#CBB77C',
+  cardDark:   'rgba(14, 15, 15, 0.88)',
+  borderGold: 'rgba(255, 213, 121, 0.13)',
+  gold:       '#F7C653',
+  olive:      '#9BC76D',
+  mutedLight: '#CFC4AE',
+  mutedDark:  '#6B5B44',
+  textLight:  '#F7E8C0',
+  textDark:   '#2C251C',
+};
+
+function statusColor(status: FlashcardArchiveEntry['status']): string {
+  if (status === 'known') return '#27AE60';
+  if (status === 'hard')  return '#E67E22';
+  if (status === 'again') return '#C0392B';
+  return 'rgba(207,196,174,0.35)'; // unknown
 }
 
-export default function ArchiveScreen() {
-  const colors = useTheme();
-  const [weeks, setWeeks] = useState<WeekSummary[]>([]);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const [cardsByWeek, setCardsByWeek] = useState<Record<number, FlashcardArchiveEntry[]>>({});
-  const [loading, setLoading] = useState(true);
+function statusLabel(status: FlashcardArchiveEntry['status']): string {
+  if (status === 'known') return 'Known';
+  if (status === 'hard')  return 'Hard';
+  if (status === 'again') return 'Again';
+  return 'New';
+}
 
-  useEffect(() => {
-    getAllArchiveWeeks().then(w => {
-      setWeeks(w);
-      setLoading(false);
-    });
-  }, []);
+interface WeekSummary { week_number: number; topic: string; count: number }
+
+export default function ArchiveScreen() {
+  const [weeks, setWeeks]             = useState<WeekSummary[]>([]);
+  const [expanded, setExpanded]       = useState<Set<number>>(new Set());
+  const [cardsByWeek, setCardsByWeek] = useState<Record<number, FlashcardArchiveEntry[]>>({});
+  const [loading, setLoading]         = useState(true);
+
+  useEffect(() => { loadWeeks(); }, []);
+
+  async function loadWeeks() {
+    const w = await getAllArchiveWeeks();
+    setWeeks(w);
+    setLoading(false);
+  }
 
   async function toggleWeek(weekNumber: number) {
     const next = new Set(expanded);
@@ -50,177 +72,172 @@ export default function ArchiveScreen() {
     setExpanded(next);
   }
 
+  async function handleDelete(card: FlashcardArchiveEntry) {
+    Alert.alert(
+      'Delete card?',
+      `"${card.english_meaning}" will be permanently removed from the archive.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete', style: 'destructive',
+          onPress: async () => {
+            await deleteArchiveCard(card.id);
+            setCardsByWeek(prev => ({
+              ...prev,
+              [card.week_number]: (prev[card.week_number] ?? []).filter(c => c.id !== card.id),
+            }));
+            setWeeks(prev => prev.map(w =>
+              w.week_number === card.week_number ? { ...w, count: w.count - 1 } : w
+            ).filter(w => w.count > 0));
+          },
+        },
+      ]
+    );
+  }
+
   return (
-    <ThemedView style={[styles.root, { backgroundColor: colors.cream }]}>
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <ThemedText style={{ color: colors.accent, fontWeight: '600' }}>← Back</ThemedText>
+    <View style={s.root}>
+      <SafeAreaView style={s.safe}>
+        <View style={s.header}>
+          <Pressable onPress={() => router.back()} style={s.backBtn}>
+            <Text style={s.backText}>← Back</Text>
           </Pressable>
-          <ThemedText type="subtitle" style={[styles.title, { color: colors.primary }]}>
-            Past Weeks
-          </ThemedText>
+          <Text style={s.title}>Past Weeks</Text>
         </View>
 
         {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator size="large" color={colors.primary} />
+          <View style={s.center}>
+            <ActivityIndicator size="large" color={C.olive} />
           </View>
         ) : weeks.length === 0 ? (
-          <View style={styles.center}>
-            <ThemedText style={styles.emptyEmoji}>📚</ThemedText>
-            <ThemedText type="subtitle" style={{ color: colors.primary }}>
-              No history yet
-            </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary" style={{ textAlign: 'center' }}>
-              Complete your first week of flashcards to start building your vocabulary library.
-            </ThemedText>
+          <View style={s.center}>
+            <Text style={s.emptyEmoji}>📚</Text>
+            <Text style={s.emptyTitle}>No history yet</Text>
+            <Text style={s.emptySub}>
+              Complete your first week of flashcards to build your vocabulary library.
+            </Text>
           </View>
         ) : (
-          <ScrollView
-            contentContainerStyle={styles.scroll}
-            showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
             {weeks.map(week => {
               const isExpanded = expanded.has(week.week_number);
               const cards = cardsByWeek[week.week_number] ?? [];
+              const known = cards.filter(c => c.status === 'known').length;
               return (
-                <ThemedView
-                  key={week.week_number}
-                  type="surface"
-                  style={[styles.weekCard, { borderColor: colors.divider }]}>
-                  {/* Week header row */}
-                  <Pressable onPress={() => toggleWeek(week.week_number)} style={styles.weekHeader}>
-                    <View style={styles.weekHeaderLeft}>
-                      <ThemedText style={[styles.weekLabel, { color: colors.primary }]}>
-                        Week {week.week_number}
-                      </ThemedText>
-                      <ThemedText type="small" themeColor="textSecondary">
+                <View key={week.week_number} style={s.weekCard}>
+                  <Pressable onPress={() => toggleWeek(week.week_number)} style={s.weekHeader}>
+                    <View style={s.weekHeaderLeft}>
+                      <Text style={s.weekLabel}>Week {week.week_number}</Text>
+                      <Text style={s.weekSub}>
                         {week.topic} · {week.count} cards
-                      </ThemedText>
+                        {isExpanded && cards.length > 0 ? `  ·  ${known} known` : ''}
+                      </Text>
                     </View>
-                    <ThemedText style={{ color: colors.accent, fontSize: 18 }}>
-                      {isExpanded ? '▲' : '▼'}
-                    </ThemedText>
+                    <Text style={s.chevron}>{isExpanded ? '▲' : '▼'}</Text>
                   </Pressable>
 
-                  {/* Expanded cards list */}
                   {isExpanded && (
                     <>
                       {cards.length === 0 ? (
-                        <ActivityIndicator color={colors.primary} style={{ marginVertical: Spacing.two }} />
+                        <ActivityIndicator color={C.olive} style={{ marginVertical: 16 }} />
                       ) : (
                         <>
                           {cards.map(card => (
-                            <View
-                              key={card.id}
-                              style={[styles.cardRow, { borderTopColor: colors.divider }]}>
-                              <View style={styles.cardText}>
-                                <ThemedText style={[styles.cardArabic, { color: colors.text }]}>
-                                  {card.arabic_script}
-                                </ThemedText>
-                                <ThemedText type="small" themeColor="textSecondary" style={styles.cardTranslit}>
-                                  {card.transliteration}
-                                </ThemedText>
-                                <ThemedText type="small" style={{ color: colors.text }}>
-                                  {card.english_meaning}
-                                </ThemedText>
+                            <View key={card.id} style={s.cardRow}>
+                              <View style={[s.statusDot, { backgroundColor: statusColor(card.status) }]} />
+                              <View style={s.cardText}>
+                                <Text style={s.cardArabic}>{card.arabic_script}</Text>
+                                <Text style={s.cardTranslit}>{card.transliteration}</Text>
+                                <Text style={s.cardEnglish}>{card.english_meaning}</Text>
                               </View>
-                              <View
-                                style={[
-                                  styles.statusDot,
-                                  { backgroundColor: card.status === 'known' ? '#27AE60' : '#C0392B' },
-                                ]}
-                              />
+                              <View style={s.cardRight}>
+                                <Text style={[s.statusChip, { color: statusColor(card.status) }]}>
+                                  {statusLabel(card.status)}
+                                </Text>
+                                <Pressable onPress={() => handleDelete(card)} hitSlop={8}>
+                                  <Text style={s.deleteBtn}>✕</Text>
+                                </Pressable>
+                              </View>
                             </View>
                           ))}
 
                           <Pressable
-                            onPress={() =>
-                              router.push({
-                                pathname: '/(tabs)/flashcards',
-                                params: { reviewWeek: String(week.week_number) },
-                              })
-                            }
-                            style={[styles.reviewBtn, { backgroundColor: colors.primary }]}>
-                            <ThemedText style={styles.reviewBtnText}>
-                              Review Again
-                            </ThemedText>
+                            onPress={() => router.push({
+                              pathname: '/(tabs)/flashcards',
+                              params: { reviewWeek: String(week.week_number) },
+                            })}
+                            style={s.reviewBtn}
+                          >
+                            <Text style={s.reviewBtnText}>Review Again</Text>
                           </Pressable>
                         </>
                       )}
                     </>
                   )}
-                </ThemedView>
+                </View>
               );
             })}
           </ScrollView>
         )}
       </SafeAreaView>
-    </ThemedView>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1 },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: C.sand },
   safe: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three, padding: Spacing.four },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24 },
+
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.three,
-    paddingBottom: Spacing.two,
-    gap: Spacing.three,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, gap: 16,
   },
-  backBtn: { paddingVertical: Spacing.one },
-  title: { fontSize: 22, fontWeight: '700' },
-  scroll: {
-    paddingHorizontal: Spacing.four,
-    paddingBottom: Spacing.six,
-    gap: Spacing.three,
-  },
-  emptyEmoji: { fontSize: 48 },
+  backBtn: { paddingVertical: 4 },
+  backText: { color: C.mutedDark, fontWeight: '700', fontSize: 15 },
+  title: { color: C.textDark, fontSize: 22, fontWeight: '800' },
+
+  scroll: { paddingHorizontal: 16, paddingBottom: 80, gap: 12 },
+
+  emptyEmoji: { fontSize: 48, textAlign: 'center' },
+  emptyTitle: { color: C.textDark, fontSize: 20, fontWeight: '700', textAlign: 'center' },
+  emptySub:   { color: C.mutedDark, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+
   weekCard: {
-    borderRadius: Spacing.four,
+    backgroundColor: C.cardDark,
+    borderRadius: 18,
     borderWidth: 1,
+    borderColor: C.borderGold,
     overflow: 'hidden',
   },
   weekHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: Spacing.four,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 18,
   },
-  weekHeaderLeft: { gap: 2, flex: 1 },
-  weekLabel: { fontSize: 16, fontWeight: '700' },
+  weekHeaderLeft: { flex: 1, gap: 3 },
+  weekLabel: { color: C.gold, fontSize: 16, fontWeight: '700' },
+  weekSub:   { color: C.mutedLight, fontSize: 12 },
+  chevron:   { color: C.gold, fontSize: 16 },
+
   cardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.three,
-    borderTopWidth: 1,
-    gap: Spacing.three,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 18, paddingVertical: 12,
+    borderTopWidth: 1, borderTopColor: 'rgba(255,213,121,0.08)',
+    gap: 12,
   },
+  statusDot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
   cardText: { flex: 1, gap: 2 },
-  cardArabic: {
-    fontSize: 20,
-    fontWeight: '600',
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  cardTranslit: { fontStyle: 'italic' },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    flexShrink: 0,
-  },
+  cardArabic:  { color: C.textLight, fontSize: 18, fontWeight: '600', textAlign: 'right', writingDirection: 'rtl' },
+  cardTranslit:{ color: C.mutedLight, fontSize: 12, fontStyle: 'italic' },
+  cardEnglish: { color: C.mutedLight, fontSize: 13 },
+  cardRight: { alignItems: 'flex-end', gap: 6, flexShrink: 0 },
+  statusChip: { fontSize: 11, fontWeight: '700' },
+  deleteBtn:  { color: 'rgba(192,57,43,0.7)', fontSize: 16, fontWeight: '700', padding: 2 },
+
   reviewBtn: {
-    margin: Spacing.four,
-    marginTop: Spacing.three,
-    borderRadius: Spacing.three,
-    paddingVertical: Spacing.three,
-    alignItems: 'center',
+    margin: 16, marginTop: 12,
+    borderRadius: 12, paddingVertical: 13,
+    alignItems: 'center', backgroundColor: C.olive,
   },
-  reviewBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  reviewBtnText: { color: C.textDark, fontWeight: '800', fontSize: 15 },
 });

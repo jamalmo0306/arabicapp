@@ -3,6 +3,7 @@
 // The app renders fully on web for UI preview purposes.
 
 import type {
+  ActivityLog,
   Badge,
   BadgeKey,
   FlashCard,
@@ -11,6 +12,7 @@ import type {
   Session,
   UserSettings,
   WeeklyCheckIn,
+  WeeklySummary,
 } from '@/context/types';
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -55,8 +57,17 @@ export async function updateSettings(_: Partial<UserSettings>): Promise<void> {}
 export async function insertArchiveCards(_weekNumber: number, _topic: string, _cards: FlashCard[]): Promise<void> {}
 export async function getArchiveCardsForWeek(_weekNumber: number): Promise<FlashcardArchiveEntry[]> { return []; }
 export async function getAllArchiveWeeks(): Promise<{ week_number: number; topic: string; count: number }[]> { return []; }
-export async function markArchiveCard(_id: number, _status: 'known' | 'unknown'): Promise<void> {}
+export async function markArchiveCard(_id: number, _status: 'known' | 'unknown' | 'again' | 'hard'): Promise<void> {}
 export async function getFlashcardReviewForWeek(_weekNumber: number): Promise<FlashcardReview | null> { return null; }
 export async function getKnownCardsForWeek(_weekNumber: number): Promise<FlashcardArchiveEntry[]> { return []; }
 export async function deleteArchiveCardsForWeek(_weekNumber: number): Promise<void> {}
 export async function getMostUnknownTopic(): Promise<string | null> { return null; }
+export async function deleteArchiveCard(_id: number): Promise<void> {}
+
+export async function insertActivityLog(_: Omit<ActivityLog, 'id'>): Promise<void> {}
+export async function getActivityLogInRange(_start: string, _end: string): Promise<ActivityLog[]> { return []; }
+export async function getActivityLogByWeek(_weekNumber: number): Promise<ActivityLog[]> { return []; }
+export async function getAllActivityLog(): Promise<ActivityLog[]> { return []; }
+
+export async function insertOrUpdateWeeklySummary(_: Omit<WeeklySummary, 'id'>): Promise<void> {}
+export async function getAllWeeklySummaries(): Promise<WeeklySummary[]> { return []; }

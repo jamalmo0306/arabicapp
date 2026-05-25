@@ -23,6 +23,7 @@ import type {
 import {
   deleteArchiveCardsForWeek,
   getAllBadges,
+  getActivityLogByWeek,
   getArchiveCardsForWeek,
   getFlashcardReviewForWeek,
   getKnownCardsForWeek,
@@ -32,10 +33,12 @@ import {
   getTotalMinutes,
   getTutorSessionCount,
   initDb,
+  insertActivityLog,
   insertArchiveCards,
   insertBadge,
   insertCheckIn,
   insertFlashcardReview,
+  insertOrUpdateWeeklySummary,
   insertSession,
   markArchiveCard as dbMarkArchiveCard,
   updateSettings,
@@ -65,13 +68,14 @@ interface AppContextValue {
     pillars: PillarKey[];
     notes?: string;
     isTutorSession?: boolean;
+    activityType?: string;
   }): Promise<void>;
   saveFlashcardBatch(review: Omit<FlashcardReview, 'id'>): Promise<void>;
   saveCheckIn(answers: CheckInAnswers, aiResponse: string): Promise<void>;
   patchSettings(patch: Partial<UserSettings>): Promise<void>;
   triggerConfetti(): void;
   refreshStats(): Promise<void>;
-  markCard(id: number, status: 'known' | 'unknown'): Promise<void>;
+  markCard(id: number, status: 'known' | 'unknown' | 'again' | 'hard'): Promise<void>;
   importWeeklyCards(weekNumber: number, rawCards: RawImportCard[]): Promise<void>;
   clearWeekCards(weekNumber: number): Promise<void>;
   dismissWeekComplete(): void;
@@ -161,6 +165,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setSettings(prev => ({ ...prev, current_week: newWeek }));
           setWeekCompleteInfo({ completedWeek: s.current_week });
           effectiveWeek = newWeek;
+
+          // Summarise the completed week's activity
+          const weekActivities = await getActivityLogByWeek(s.current_week);
+          if (weekActivities.length > 0) {
+            const totalMins = weekActivities.reduce((sum, a) => sum + (a.minutes || 0), 0);
+            const counts: Record<string, number> = {};
+            for (const a of weekActivities) counts[a.activity_type] = (counts[a.activity_type] || 0) + 1;
+            const mostUsed = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+            await insertOrUpdateWeeklySummary({
+              week_number: s.current_week,
+              week_start_date: weekStart,
+              total_activities: weekActivities.length,
+              total_minutes: totalMins,
+              most_used_activity: mostUsed,
+              notes: null,
+              created_at: new Date().toISOString(),
+            });
+          }
         }
       }
     }
@@ -225,7 +247,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     confettiRef.current?.start();
   }, []);
 
-  const markCard = useCallback(async (id: number, status: 'known' | 'unknown') => {
+  const markCard = useCallback(async (id: number, status: 'known' | 'unknown' | 'again' | 'hard') => {
     await dbMarkArchiveCard(id, status);
     setCurrentWeekCards(prev =>
       prev.map(c => (c.id === id ? { ...c, status } : c))
@@ -238,11 +260,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       pillars,
       notes,
       isTutorSession = false,
+      activityType,
     }: {
       minutes: number;
       pillars: PillarKey[];
       notes?: string;
       isTutorSession?: boolean;
+      activityType?: string;
     }) => {
       const today = toDateString();
       const currentSettings = await getSettings();
@@ -271,6 +295,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         streak_count: newStreak,
         last_session_date: today,
       });
+
+      if (activityType) {
+        const currentSettings2 = await getSettings();
+        await insertActivityLog({
+          date: today,
+          activity_type: activityType,
+          minutes: minutes || null,
+          notes: notes || null,
+          week_number: currentSettings2.current_week,
+          created_at: new Date().toISOString(),
+        });
+      }
 
       const [totalMinutes, totalBatches, tutorCount, allBadges] =
         await Promise.all([

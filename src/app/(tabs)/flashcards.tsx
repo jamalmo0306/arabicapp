@@ -109,8 +109,10 @@ export default function FlashcardsScreen() {
       if (rest.length === 0) { endSession(newGood); return; }
       setQueue(rest);
     } else if (rating === 'hard') {
+      markCard(current.id, 'hard');
       setQueue([...rest, current]);
     } else {
+      markCard(current.id, 'again');
       const at = Math.min(2, rest.length);
       const next = [...rest];
       next.splice(at, 0, current);

@@ -37,8 +37,29 @@ export interface FlashcardArchiveEntry {
   transliteration: string;
   english_meaning: string;
   example_situation: string;
-  status: 'known' | 'unknown';
+  status: 'known' | 'unknown' | 'again' | 'hard';
   created_at: string; // ISO timestamp
+}
+
+export interface ActivityLog {
+  id: number;
+  date: string; // YYYY-MM-DD
+  activity_type: string;
+  minutes: number | null;
+  notes: string | null;
+  week_number: number;
+  created_at: string;
+}
+
+export interface WeeklySummary {
+  id: number;
+  week_number: number;
+  week_start_date: string;
+  total_activities: number;
+  total_minutes: number;
+  most_used_activity: string;
+  notes: string | null;
+  created_at: string;
 }
 
 export interface Badge {
