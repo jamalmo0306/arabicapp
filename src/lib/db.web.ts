@@ -64,10 +64,22 @@ export async function deleteArchiveCardsForWeek(_weekNumber: number): Promise<vo
 export async function getMostUnknownTopic(): Promise<string | null> { return null; }
 export async function deleteArchiveCard(_id: number): Promise<void> {}
 
-export async function insertActivityLog(_: Omit<ActivityLog, 'id'>): Promise<void> {}
-export async function getActivityLogInRange(_start: string, _end: string): Promise<ActivityLog[]> { return []; }
-export async function getActivityLogByWeek(_weekNumber: number): Promise<ActivityLog[]> { return []; }
-export async function getAllActivityLog(): Promise<ActivityLog[]> { return []; }
+// In-memory activity log so the chart reflects logged sessions on web
+let _activityLogs: ActivityLog[] = [];
+let _nextLogId = 1;
+
+export async function insertActivityLog(entry: Omit<ActivityLog, 'id'>): Promise<void> {
+  _activityLogs = [{ ...entry, id: _nextLogId++ }, ..._activityLogs];
+}
+export async function getActivityLogInRange(start: string, end: string): Promise<ActivityLog[]> {
+  return _activityLogs.filter(l => l.date >= start && l.date <= end);
+}
+export async function getActivityLogByWeek(weekNumber: number): Promise<ActivityLog[]> {
+  return _activityLogs.filter(l => l.week_number === weekNumber);
+}
+export async function getAllActivityLog(): Promise<ActivityLog[]> {
+  return [..._activityLogs];
+}
 
 export async function insertOrUpdateWeeklySummary(_: Omit<WeeklySummary, 'id'>): Promise<void> {}
 export async function getAllWeeklySummaries(): Promise<WeeklySummary[]> { return []; }
