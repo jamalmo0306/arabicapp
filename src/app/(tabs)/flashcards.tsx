@@ -618,7 +618,7 @@ const s = StyleSheet.create({
   studyArea: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingBottom: BottomTabInset + 16,
+    paddingBottom: Math.max(BottomTabInset, 96) + 20,
     gap: 16,
   },
   cardContainer: { flex: 1 },
