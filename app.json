@@ -8,7 +8,11 @@
     "scheme": "arabicapp",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "bundleIdentifier": "com.jammy123.arabicapp",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["duolingo", "lingq"]
+      }
     },
     "android": {
       "adaptiveIcon": {

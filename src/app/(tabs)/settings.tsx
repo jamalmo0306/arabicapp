@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -13,38 +13,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 
 import { useAppContext } from '@/context/app-context';
+import type { AppColors } from '@/lib/theme';
 import type { UserSettings } from '@/context/types';
-
-// ── Colors (mirrors HomeScreen palette) ───────────────────────────────────────
-const C = {
-  bg:          '#15150F',
-  scrollBg:    '#CBB77C',
-  blackGlass:  'rgba(14, 15, 15, 0.88)',
-  borderGold:  'rgba(255, 213, 121, 0.13)',
-  gold:        '#F7C653',
-  goldSoft:    'rgba(247, 198, 83, 0.18)',
-  olive:       '#9BC76D',
-  oliveDim:    'rgba(118, 147, 70, 0.28)',
-  mutedLight:  '#CFC4AE',
-  textLight:   '#F7E8C0',
-  white:       '#FFFFFF',
-  inputBg:     'rgba(255, 255, 255, 0.06)',
-  inputBorder: 'rgba(255, 213, 121, 0.28)',
-  divider:     'rgba(255, 213, 121, 0.10)',
-  btnInactive: 'rgba(255, 255, 255, 0.07)',
-  btnBorder:   'rgba(255, 213, 121, 0.20)',
-};
 
 const WEEK_OPTIONS = Array.from({ length: 52 }, (_, i) => i + 1);
 
-const DARK_MODE_OPTIONS: { value: UserSettings['dark_mode']; icon: string; label: string }[] = [
-  { value: 'system', icon: '⚙️', label: 'System' },
-  { value: 'light',  icon: '☀️', label: 'Light'  },
-  { value: 'dark',   icon: '🌙', label: 'Dark'   },
+const DARK_MODE_OPTIONS: { value: 'light' | 'dark'; icon: string; label: string }[] = [
+  { value: 'light', icon: '☀️', label: 'Light' },
+  { value: 'dark',  icon: '🌙', label: 'Dark'  },
 ];
 
 export default function SettingsScreen() {
-  const { settings, patchSettings } = useAppContext();
+  const { settings, patchSettings, colors } = useAppContext();
+  const C = colors;
+
   const [apiKeyDraft, setApiKeyDraft] = useState(settings.api_key);
   const [apiSaved,    setApiSaved]    = useState(false);
 
@@ -52,6 +34,8 @@ export default function SettingsScreen() {
   const [resourceSubtitle, setResourceSubtitle] = useState(settings.resource_subtitle);
   const [resourceUrl,      setResourceUrl]      = useState(settings.resource_url);
   const [resourceSaved,    setResourceSaved]    = useState(false);
+
+  const s = useMemo(() => makeStyles(C), [C]);
 
   async function saveResource() {
     await patchSettings({
@@ -63,7 +47,7 @@ export default function SettingsScreen() {
     setTimeout(() => setResourceSaved(false), 2000);
   }
 
-  async function setDarkMode(mode: UserSettings['dark_mode']) {
+  async function setDarkMode(mode: 'light' | 'dark') {
     await patchSettings({ dark_mode: mode });
   }
 
@@ -80,7 +64,7 @@ export default function SettingsScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor={C.scrollBg} />
+      <StatusBar barStyle={C.statusBar} backgroundColor={C.statusBarBg} />
 
       <SafeAreaView style={s.safe} edges={['top']}>
         <ScrollView
@@ -126,12 +110,10 @@ export default function SettingsScreen() {
               </View>
             </View>
 
-            {/* Progress bar */}
             <View style={s.weekProgressTrack}>
               <View style={[s.weekProgressFill, { width: `${(settings.current_week / 52) * 100}%` }]} />
             </View>
 
-            {/* Week grid */}
             <View style={s.weekGrid}>
               {WEEK_OPTIONS.map(w => {
                 const active = settings.current_week === w;
@@ -154,7 +136,6 @@ export default function SettingsScreen() {
           {/* ── API KEY ── */}
           <View style={s.card}>
             <Text style={s.sectionLabel}>ANTHROPIC API KEY</Text>
-
             <View style={s.apiRow}>
               <TextInput
                 value={apiKeyDraft}
@@ -168,72 +149,34 @@ export default function SettingsScreen() {
                 style={s.apiInput}
               />
               <Pressable onPress={saveApiKey} style={s.apiSaveBtn}>
-                <Text style={s.apiSaveBtnText}>
-                  {apiSaved ? '✓' : 'Save'}
-                </Text>
+                <Text style={s.apiSaveBtnText}>{apiSaved ? '✓' : 'Save'}</Text>
               </Pressable>
             </View>
-
             <Text style={s.helpText}>
               🔑  Get a free key at{' '}
               <Text style={s.helpLink}>console.anthropic.com</Text>
-              {' '}— needed for flashcards &amp; AI coach.
+              {' '}— needed for AI features.
             </Text>
           </View>
 
           {/* ── WEEKLY RESOURCE ── */}
           <View style={s.card}>
             <Text style={s.sectionLabel}>WEEKLY RESOURCE</Text>
-
-            <TextInput
-              value={resourceTitle}
-              onChangeText={setResourceTitle}
-              placeholder="Title"
-              placeholderTextColor="rgba(207,196,174,0.5)"
-              autoCorrect={false}
-              style={s.apiInput}
-            />
-            <TextInput
-              value={resourceSubtitle}
-              onChangeText={setResourceSubtitle}
-              placeholder="Subtitle"
-              placeholderTextColor="rgba(207,196,174,0.5)"
-              autoCorrect={false}
-              style={s.apiInput}
-            />
-            <TextInput
-              value={resourceUrl}
-              onChangeText={setResourceUrl}
-              placeholder="https://…"
-              placeholderTextColor="rgba(207,196,174,0.5)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              style={s.apiInput}
-            />
-
+            <TextInput value={resourceTitle}    onChangeText={setResourceTitle}    placeholder="Title"    placeholderTextColor="rgba(207,196,174,0.5)" autoCorrect={false} style={s.apiInput} />
+            <TextInput value={resourceSubtitle} onChangeText={setResourceSubtitle} placeholder="Subtitle" placeholderTextColor="rgba(207,196,174,0.5)" autoCorrect={false} style={s.apiInput} />
+            <TextInput value={resourceUrl}      onChangeText={setResourceUrl}      placeholder="https://…" placeholderTextColor="rgba(207,196,174,0.5)" autoCapitalize="none" autoCorrect={false} keyboardType="url" style={s.apiInput} />
             <Pressable onPress={saveResource} style={s.apiSaveBtn}>
-              <Text style={s.apiSaveBtnText}>
-                {resourceSaved ? '✓ Saved' : 'Save Resource'}
-              </Text>
+              <Text style={s.apiSaveBtnText}>{resourceSaved ? '✓ Saved' : 'Save Resource'}</Text>
             </Pressable>
           </View>
 
           {/* ── TOOLS ── */}
           <View style={s.card}>
             <Text style={s.sectionLabel}>TOOLS</Text>
-
-            <Pressable
-              onPress={() => router.push('/(modal)/checkin')}
-              style={s.primaryBtn}
-            >
+            <Pressable onPress={() => router.push('/(modal)/checkin')} style={s.primaryBtn}>
               <Text style={s.primaryBtnText}>📋  Weekly Check-In</Text>
             </Pressable>
-
-            <Pressable
-              onPress={() => router.push('/(modal)/roadmap')}
-              style={s.outlineBtn}
-            >
+            <Pressable onPress={() => router.push('/(modal)/roadmap')} style={s.outlineBtn}>
               <Text style={s.outlineBtnText}>🗺️  View 12-Week Roadmap</Text>
             </Pressable>
           </View>
@@ -244,203 +187,50 @@ export default function SettingsScreen() {
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────────────────────
-const s = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: C.bg },
-  screen: { flex: 1, backgroundColor: C.scrollBg },
+function makeStyles(C: AppColors) {
+  return StyleSheet.create({
+    safe:   { flex: 1, backgroundColor: C.safe },
+    screen: { flex: 1, backgroundColor: C.scrollBg },
+    scrollContent: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 140, gap: 14 },
 
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: 140,
-    gap: 14,
-  },
+    header:   { marginBottom: 6 },
+    logoRow:  { flexDirection: 'row', alignItems: 'center' },
+    logoIcon: { fontSize: 32, marginRight: 12 },
+    title:    { color: C.textDark, fontSize: 28, fontWeight: '800', letterSpacing: 0.1 },
 
-  // ─ Header ─
-  header:   { marginBottom: 6 },
-  logoRow:  { flexDirection: 'row', alignItems: 'center' },
-  logoIcon: { fontSize: 32, marginRight: 12 },
-  title: {
-    color: '#2C251C',
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: 0.1,
-  },
+    card: { backgroundColor: C.blackGlass, borderRadius: 20, borderWidth: 1, borderColor: C.borderGold, padding: 20, gap: 14 },
 
-  // ─ Glass card ─
-  card: {
-    backgroundColor: C.blackGlass,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: C.borderGold,
-    padding: 20,
-    gap: 14,
-  },
+    sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    sectionLabel: { color: C.gold, fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
 
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionLabel: {
-    color: C.gold,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-  },
+    row: { flexDirection: 'row', gap: 10 },
+    modeBtn:       { flex: 1, paddingVertical: 12, borderRadius: 14, borderWidth: 1.5, borderColor: C.btnBorder, backgroundColor: C.btnInactive, alignItems: 'center', gap: 4 },
+    modeBtnActive: { backgroundColor: C.goldSoft, borderColor: C.gold },
+    modeIcon:      { fontSize: 22 },
+    modeLabel:     { color: C.mutedLight, fontSize: 12, fontWeight: '600' },
+    modeLabelActive:{ color: C.textDark, fontWeight: '800' },
 
-  // ─ Appearance ─
-  row: { flexDirection: 'row', gap: 10 },
+    weekPill:     { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: C.oliveDim, borderWidth: 1, borderColor: C.olive },
+    weekPillText: { color: C.olive, fontSize: 11, fontWeight: '700' },
+    weekProgressTrack: { height: 6, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.10)', overflow: 'hidden' },
+    weekProgressFill:  { height: '100%', backgroundColor: C.olive, borderRadius: 10 },
+    weekGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    weekBtn:          { width: 44, height: 44, borderRadius: 12, borderWidth: 1.5, borderColor: C.btnBorder, backgroundColor: C.btnInactive, alignItems: 'center', justifyContent: 'center' },
+    weekBtnActive:    { backgroundColor: C.goldSoft, borderColor: C.gold },
+    weekBtnPast:      { backgroundColor: C.oliveDim, borderColor: 'rgba(118,147,70,0.35)' },
+    weekBtnText:      { color: C.mutedLight, fontSize: 14, fontWeight: '700' },
+    weekBtnTextActive:{ color: C.textDark, fontWeight: '800' },
 
-  modeBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: C.btnBorder,
-    backgroundColor: C.btnInactive,
-    alignItems: 'center',
-    gap: 4,
-  },
-  modeBtnActive: {
-    backgroundColor: C.goldSoft,
-    borderColor: C.gold,
-  },
-  modeIcon:  { fontSize: 22 },
-  modeLabel: {
-    color: C.mutedLight,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  modeLabelActive: {
-    color: '#2C251C',
-    fontWeight: '800',
-  },
+    apiRow:       { flexDirection: 'row', gap: 10, alignItems: 'center' },
+    apiInput:     { flex: 1, backgroundColor: C.inputBg, borderWidth: 1.5, borderColor: C.inputBorder, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, color: C.textLight },
+    apiSaveBtn:   { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, backgroundColor: C.goldSoft, borderWidth: 1.5, borderColor: C.gold, minWidth: 54, alignItems: 'center' },
+    apiSaveBtnText:{ color: C.textDark, fontSize: 13, fontWeight: '800' },
+    helpText:     { color: C.mutedLight, fontSize: 12, lineHeight: 18 },
+    helpLink:     { color: C.gold, fontWeight: '600' },
 
-  // ─ Week picker ─
-  weekPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: C.oliveDim,
-    borderWidth: 1,
-    borderColor: C.olive,
-  },
-  weekPillText: {
-    color: C.olive,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  weekProgressTrack: {
-    height: 6,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    overflow: 'hidden',
-  },
-  weekProgressFill: {
-    height: '100%',
-    backgroundColor: C.olive,
-    borderRadius: 10,
-  },
-  weekGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  weekBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: C.btnBorder,
-    backgroundColor: C.btnInactive,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  weekBtnActive: {
-    backgroundColor: C.goldSoft,
-    borderColor: C.gold,
-  },
-  weekBtnPast: {
-    backgroundColor: C.oliveDim,
-    borderColor: 'rgba(118,147,70,0.35)',
-  },
-  weekBtnText: {
-    color: C.mutedLight,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  weekBtnTextActive: {
-    color: '#2C251C',
-    fontWeight: '800',
-  },
-
-  // ─ API key ─
-  apiRow: {
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'center',
-  },
-  apiInput: {
-    flex: 1,
-    backgroundColor: C.inputBg,
-    borderWidth: 1.5,
-    borderColor: C.inputBorder,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: C.white,
-  },
-  apiSaveBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: C.goldSoft,
-    borderWidth: 1.5,
-    borderColor: C.gold,
-    minWidth: 54,
-    alignItems: 'center',
-  },
-  apiSaveBtnText: {
-    color: '#2C251C',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  helpText: {
-    color: C.mutedLight,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  helpLink: {
-    color: C.gold,
-    fontWeight: '600',
-  },
-
-  // ─ Tool buttons ─
-  primaryBtn: {
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: 'center',
-    backgroundColor: C.olive,
-  },
-  primaryBtnText: {
-    color: '#15150F',
-    fontWeight: '800',
-    fontSize: 15,
-    letterSpacing: 0.2,
-  },
-  outlineBtn: {
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: 'center',
-    backgroundColor: C.btnInactive,
-    borderWidth: 1.5,
-    borderColor: C.inputBorder,
-  },
-  outlineBtnText: {
-    color: C.textLight,
-    fontWeight: '700',
-    fontSize: 15,
-  },
-});
+    primaryBtn:     { borderRadius: 14, paddingVertical: 15, alignItems: 'center', backgroundColor: C.olive },
+    primaryBtnText: { color: '#15150F', fontWeight: '800', fontSize: 15, letterSpacing: 0.2 },
+    outlineBtn:     { borderRadius: 14, paddingVertical: 15, alignItems: 'center', backgroundColor: C.btnInactive, borderWidth: 1.5, borderColor: C.inputBorder },
+    outlineBtnText: { color: C.textLight, fontWeight: '700', fontSize: 15 },
+  });
+}

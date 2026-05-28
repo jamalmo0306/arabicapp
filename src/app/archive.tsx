@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppContext } from '@/context/app-context';
+import type { AppColors } from '@/lib/theme';
 import type { FlashcardArchiveEntry } from '@/context/types';
 import {
   deleteArchiveCard,
@@ -20,23 +21,6 @@ import {
   getArchiveCardsForWeek,
   getArchiveMonths,
 } from '@/lib/db';
-
-const C = {
-  bg:         '#15150F',
-  sand:       '#CBB77C',
-  cardDark:   'rgba(14, 15, 15, 0.88)',
-  borderGold: 'rgba(255, 213, 121, 0.13)',
-  gold:       '#F7C653',
-  goldSoft:   'rgba(247, 198, 83, 0.18)',
-  olive:      '#9BC76D',
-  oliveDim:   'rgba(118, 147, 70, 0.30)',
-  mutedLight: '#CFC4AE',
-  mutedDark:  '#6B5B44',
-  textLight:  '#F7E8C0',
-  textDark:   '#2C251C',
-  btnInactive:'rgba(255, 255, 255, 0.07)',
-  btnBorder:  'rgba(255, 213, 121, 0.20)',
-};
 
 type ViewMode = 'week' | 'month';
 
@@ -67,10 +51,12 @@ function CardList({
   cards,
   onDelete,
   weekNumber,
+  s,
 }: {
   cards: FlashcardArchiveEntry[];
   onDelete: (card: FlashcardArchiveEntry) => void;
   weekNumber?: number;
+  s: ReturnType<typeof makeStyles>;
 }) {
   return (
     <>
@@ -108,19 +94,19 @@ function CardList({
 }
 
 export default function ArchiveScreen() {
-  const { settings } = useAppContext();
+  const { settings, colors } = useAppContext();
+  const C = colors;
+  const s = useMemo(() => makeStyles(C), [C]);
   const currentWeek = settings.current_week;
 
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [loading, setLoading]   = useState(true);
 
-  // Week mode
   const [weeks, setWeeks]           = useState<WeekSummary[]>([]);
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
   const [weekCards, setWeekCards]   = useState<FlashcardArchiveEntry[]>([]);
   const [loadingCards, setLoadingCards] = useState(false);
 
-  // Month mode
   const [months, setMonths]               = useState<MonthSummary[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [monthCards, setMonthCards]       = useState<FlashcardArchiveEntry[]>([]);
@@ -199,7 +185,6 @@ export default function ArchiveScreen() {
           <Text style={s.title}>Vocabulary Archive</Text>
         </View>
 
-        {/* Mode toggle */}
         <View style={s.toggleRow}>
           <Pressable
             onPress={() => setViewMode('week')}
@@ -222,7 +207,6 @@ export default function ArchiveScreen() {
         ) : (
           <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-            {/* ── BY WEEK ── */}
             {viewMode === 'week' && (
               <>
                 {weeks.length === 0 ? (
@@ -283,6 +267,7 @@ export default function ArchiveScreen() {
                             cards={weekCards}
                             onDelete={handleDelete}
                             weekNumber={selectedWeek}
+                            s={s}
                           />
                         )}
                       </View>
@@ -292,7 +277,6 @@ export default function ArchiveScreen() {
               </>
             )}
 
-            {/* ── BY MONTH ── */}
             {viewMode === 'month' && (
               <>
                 {months.length === 0 ? (
@@ -322,7 +306,7 @@ export default function ArchiveScreen() {
                           loadingCards ? (
                             <ActivityIndicator color={C.olive} style={{ marginVertical: 16 }} />
                           ) : (
-                            <CardList cards={monthCards} onDelete={handleDelete} />
+                            <CardList cards={monthCards} onDelete={handleDelete} s={s} />
                           )
                         )}
                       </View>
@@ -339,128 +323,111 @@ export default function ArchiveScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.sand },
-  safe: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+function makeStyles(C: AppColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: C.scrollBg },
+    safe: { flex: 1 },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, gap: 16,
-  },
-  backBtn:  { paddingVertical: 4 },
-  backText: { color: C.mutedDark, fontWeight: '700', fontSize: 15 },
-  title:    { color: C.textDark, fontSize: 22, fontWeight: '800' },
+    header: {
+      flexDirection: 'row', alignItems: 'center',
+      paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, gap: 16,
+    },
+    backBtn:  { paddingVertical: 4 },
+    backText: { color: C.mutedDark, fontWeight: '700', fontSize: 15 },
+    title:    { color: C.textDark, fontSize: 22, fontWeight: '800' },
 
-  // Mode toggle
-  toggleRow: {
-    flexDirection: 'row',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: C.cardDark,
-    borderRadius: 12,
-    padding: 3,
-    gap: 3,
-  },
-  toggleBtn: {
-    flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center',
-  },
-  toggleBtnActive: { backgroundColor: C.gold },
-  toggleText:       { color: C.mutedLight, fontWeight: '700', fontSize: 14 },
-  toggleTextActive: { color: C.textDark,   fontWeight: '800', fontSize: 14 },
+    toggleRow: {
+      flexDirection: 'row',
+      marginHorizontal: 16,
+      marginBottom: 12,
+      backgroundColor: C.blackGlass,
+      borderRadius: 12,
+      padding: 3,
+      gap: 3,
+    },
+    toggleBtn: { flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center' },
+    toggleBtnActive: { backgroundColor: C.gold },
+    toggleText:       { color: C.mutedLight, fontWeight: '700', fontSize: 14 },
+    toggleTextActive: { color: C.textDark,   fontWeight: '800', fontSize: 14 },
 
-  scroll: { paddingHorizontal: 16, paddingBottom: 100, gap: 12 },
+    scroll: { paddingHorizontal: 16, paddingBottom: 100, gap: 12 },
 
-  // Week grid
-  card: {
-    backgroundColor: C.cardDark,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.borderGold,
-    padding: 16,
-    gap: 12,
-  },
-  cardSectionLabel: {
-    color: C.mutedLight,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-  },
-  weekGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  weekBtn: {
-    width: 40, height: 40, borderRadius: 10,
-    borderWidth: 1.5, borderColor: C.btnBorder,
-    backgroundColor: C.btnInactive,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  weekBtnHasCards: {
-    backgroundColor: C.oliveDim,
-    borderColor: 'rgba(155,199,109,0.45)',
-  },
-  weekBtnSelected: {
-    backgroundColor: C.goldSoft,
-    borderColor: C.gold,
-  },
-  weekBtnEmpty: { opacity: 0.35 },
-  weekBtnText:          { color: C.mutedLight, fontSize: 13, fontWeight: '700' },
-  weekBtnTextHasCards:  { color: C.olive },
-  weekBtnTextSelected:  { color: C.gold },
+    card: {
+      backgroundColor: C.blackGlass,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: C.borderGold,
+      padding: 16,
+      gap: 12,
+    },
+    cardSectionLabel: { color: C.mutedLight, fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
+    weekGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    weekBtn: {
+      width: 40, height: 40, borderRadius: 10,
+      borderWidth: 1.5, borderColor: C.btnBorder,
+      backgroundColor: C.btnInactive,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    weekBtnHasCards:  { backgroundColor: C.oliveDim, borderColor: 'rgba(155,199,109,0.45)' },
+    weekBtnSelected:  { backgroundColor: C.goldSoft, borderColor: C.gold },
+    weekBtnEmpty:     { opacity: 0.35 },
+    weekBtnText:          { color: C.mutedLight, fontSize: 13, fontWeight: '700' },
+    weekBtnTextHasCards:  { color: C.olive },
+    weekBtnTextSelected:  { color: C.gold },
 
-  // Cards section (week view)
-  cardsCard: {
-    backgroundColor: C.cardDark,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.borderGold,
-    overflow: 'hidden',
-  },
-  cardsCardHeader: { padding: 16, gap: 3 },
-  cardsCardTitle:  { color: C.gold, fontSize: 16, fontWeight: '700' },
-  cardsCardCount:  { color: C.mutedLight, fontSize: 12 },
+    cardsCard: {
+      backgroundColor: C.blackGlass,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: C.borderGold,
+      overflow: 'hidden',
+    },
+    cardsCardHeader: { padding: 16, gap: 3 },
+    cardsCardTitle:  { color: C.gold, fontSize: 16, fontWeight: '700' },
+    cardsCardCount:  { color: C.mutedLight, fontSize: 12 },
 
-  // Month cards
-  monthCard: {
-    backgroundColor: C.cardDark,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.borderGold,
-    overflow: 'hidden',
-  },
-  monthHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 18,
-  },
-  monthHeaderLeft: { flex: 1, gap: 3 },
-  monthLabel: { color: C.gold, fontSize: 16, fontWeight: '700' },
-  monthSub:   { color: C.mutedLight, fontSize: 12 },
-  chevron:    { color: C.gold, fontSize: 16 },
+    monthCard: {
+      backgroundColor: C.blackGlass,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: C.borderGold,
+      overflow: 'hidden',
+    },
+    monthHeader: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      padding: 18,
+    },
+    monthHeaderLeft: { flex: 1, gap: 3 },
+    monthLabel: { color: C.gold, fontSize: 16, fontWeight: '700' },
+    monthSub:   { color: C.mutedLight, fontSize: 12 },
+    chevron:    { color: C.gold, fontSize: 16 },
 
-  // Individual card rows
-  cardRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 18, paddingVertical: 12,
-    borderTopWidth: 1, borderTopColor: 'rgba(255,213,121,0.08)',
-    gap: 12,
-  },
-  statusDot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
-  cardText:  { flex: 1, gap: 2 },
-  cardArabic:   { color: '#F7E8C0', fontSize: 18, fontWeight: '600', textAlign: 'right', writingDirection: 'rtl' },
-  cardTranslit: { color: C.mutedLight, fontSize: 12, fontStyle: 'italic' },
-  cardEnglish:  { color: C.mutedLight, fontSize: 13 },
-  cardRight:    { alignItems: 'flex-end', gap: 6, flexShrink: 0 },
-  statusChip:   { fontSize: 11, fontWeight: '700' },
-  deleteBtn:    { color: 'rgba(192,57,43,0.7)', fontSize: 16, fontWeight: '700', padding: 2 },
+    cardRow: {
+      flexDirection: 'row', alignItems: 'center',
+      paddingHorizontal: 18, paddingVertical: 12,
+      borderTopWidth: 1, borderTopColor: 'rgba(255,213,121,0.08)',
+      gap: 12,
+    },
+    statusDot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
+    cardText:  { flex: 1, gap: 2 },
+    cardArabic:   { color: C.textLight, fontSize: 18, fontWeight: '600', textAlign: 'right', writingDirection: 'rtl' },
+    cardTranslit: { color: C.mutedLight, fontSize: 12, fontStyle: 'italic' },
+    cardEnglish:  { color: C.mutedLight, fontSize: 13 },
+    cardRight:    { alignItems: 'flex-end', gap: 6, flexShrink: 0 },
+    statusChip:   { fontSize: 11, fontWeight: '700' },
+    deleteBtn:    { color: 'rgba(192,57,43,0.7)', fontSize: 16, fontWeight: '700', padding: 2 },
 
-  reviewBtn: {
-    margin: 16, marginTop: 12,
-    borderRadius: 12, paddingVertical: 13,
-    alignItems: 'center', backgroundColor: C.olive,
-  },
-  reviewBtnText: { color: C.textDark, fontWeight: '800', fontSize: 15 },
+    reviewBtn: {
+      margin: 16, marginTop: 12,
+      borderRadius: 12, paddingVertical: 13,
+      alignItems: 'center', backgroundColor: C.olive,
+    },
+    reviewBtnText: { color: C.textDark, fontWeight: '800', fontSize: 15 },
 
-  // Empty state
-  emptyBox:  { alignItems: 'center', gap: 14, paddingVertical: 60, paddingHorizontal: 24 },
-  emptyEmoji:{ fontSize: 48, textAlign: 'center' },
-  emptyTitle:{ color: C.textDark, fontSize: 20, fontWeight: '700', textAlign: 'center' },
-  emptySub:  { color: C.mutedDark, fontSize: 14, textAlign: 'center', lineHeight: 20 },
-});
+    emptyBox:  { alignItems: 'center', gap: 14, paddingVertical: 60, paddingHorizontal: 24 },
+    emptyEmoji:{ fontSize: 48, textAlign: 'center' },
+    emptyTitle:{ color: C.textDark, fontSize: 20, fontWeight: '700', textAlign: 'center' },
+    emptySub:  { color: C.mutedDark, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  });
+}

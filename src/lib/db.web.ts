@@ -11,6 +11,7 @@ import type {
   FlashcardArchiveEntry,
   FlashcardReview,
   Session,
+  Song,
   UserSettings,
   WeeklyCheckIn,
   WeeklySummary,
@@ -160,5 +161,25 @@ export async function getAllActivityLog(): Promise<ActivityLog[]> {
   return [..._activityLogs];
 }
 
+export async function deleteActivityLog(id: number): Promise<void> {
+  _activityLogs = _activityLogs.filter(l => l.id !== id);
+}
+
 export async function insertOrUpdateWeeklySummary(_: Omit<WeeklySummary, 'id'>): Promise<void> {}
 export async function getAllWeeklySummaries(): Promise<WeeklySummary[]> { return []; }
+
+// ── In-memory songs ───────────────────────────────────────────────────────────
+
+let _songs: Song[] = [];
+let _nextSongId = 1;
+
+export async function insertSong(song: Omit<Song, 'id'>): Promise<number> {
+  const id = _nextSongId++;
+  _songs = [{ ...song, id }, ..._songs];
+  return id;
+}
+export async function getAllSongs(): Promise<Song[]> { return [..._songs]; }
+export async function deleteSong(id: number): Promise<void> { _songs = _songs.filter(s => s.id !== id); }
+export async function updateSong(id: number, song: Omit<Song, 'id' | 'created_at'>): Promise<void> {
+  _songs = _songs.map(s => s.id === id ? { ...s, ...song } : s);
+}

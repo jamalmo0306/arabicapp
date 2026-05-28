@@ -1,5 +1,6 @@
+import React from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -18,24 +19,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useAppContext } from '@/context/app-context';
+import type { AppColors } from '@/lib/theme';
 import type { FlashcardArchiveEntry, RawImportCard } from '@/context/types';
 import { getArchiveCardsForWeek } from '@/lib/db';
-
-// ── Palette (matches HomeScreen dashboard) ────────────────────────────────────
-const C = {
-  sand:       '#CBB77C',
-  bg:         '#15150F',
-  cardLight:  'rgba(244, 218, 156, 0.88)',
-  cardDark:   'rgba(14, 15, 15, 0.88)',
-  borderGold: 'rgba(218, 168, 64, 0.28)',
-  borderGoldBright: 'rgba(247, 198, 83, 0.55)',
-  textDark:   '#2C251C',
-  textLight:  '#F7E8C0',
-  mutedDark:  '#6B5B44',
-  mutedLight: '#CFC4AE',
-  olive:      '#9BC76D',
-  gold:       '#F7C653',
-};
 
 const AGAIN_COLOR = '#C0392B';
 const HARD_COLOR  = '#E67E22';
@@ -65,7 +51,11 @@ export default function FlashcardsScreen() {
     importWeeklyCards,
     clearWeekCards,
     patchSettings,
+    colors,
   } = useAppContext();
+
+  const C = colors;
+  const s = useMemo(() => makeStyles(C), [C]);
 
   const arabicFirst = settings.cards_flipped === 1;
 
@@ -77,14 +67,12 @@ export default function FlashcardsScreen() {
   const [history, setHistory] = useState<{ queue: FlashcardArchiveEntry[]; goodIds: Set<number> }[]>([]);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-  // Import modal
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState('');
   const [importSuccess, setImportSuccess] = useState('');
   const [importing, setImporting] = useState(false);
 
-  // Track which card IDs are loaded so markCard status updates don't reset the queue
   const loadedCardIdsRef = useRef<string>('');
 
   useEffect(() => {
@@ -100,7 +88,7 @@ export default function FlashcardsScreen() {
       });
     } else {
       const newIds = currentWeekCards.map(c => c.id).sort().join(',');
-      if (newIds === loadedCardIdsRef.current) return; // status-only update, keep queue
+      if (newIds === loadedCardIdsRef.current) return;
       loadedCardIdsRef.current = newIds;
       setAllCards(currentWeekCards);
       setQueue([...currentWeekCards]);
@@ -181,15 +169,22 @@ export default function FlashcardsScreen() {
     setImportError('');
     setImportSuccess('');
     setImporting(true);
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(importText.trim());
+      parsed = JSON.parse(importText.trim());
+    } catch {
+      setImportError('Invalid JSON — check your input and try again.');
+      setImporting(false);
+      return;
+    }
+    try {
       if (!Array.isArray(parsed) || parsed.length === 0) {
         setImportError('JSON must be a non-empty array.');
         setImporting(false);
         return;
       }
       for (let i = 0; i < parsed.length; i++) {
-        const item = parsed[i];
+        const item = parsed[i] as Record<string, unknown>;
         const missing = ['english', 'arabic', 'transliteration', 'situation'].filter(
           f => !item[f] || typeof item[f] !== 'string'
         );
@@ -200,11 +195,13 @@ export default function FlashcardsScreen() {
         }
       }
       await importWeeklyCards(settings.current_week, parsed as RawImportCard[]);
+      loadedCardIdsRef.current = '';
+      setSessionDone(false);
       setImportSuccess(`${parsed.length} cards loaded for Week ${settings.current_week}`);
       setImportText('');
       setTimeout(() => { setShowImport(false); setImportSuccess(''); }, 1500);
-    } catch {
-      setImportError('Invalid JSON — check your input and try again.');
+    } catch (e) {
+      setImportError(`Import failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
     } finally {
       setImporting(false);
     }
@@ -250,6 +247,8 @@ export default function FlashcardsScreen() {
             arabicFirst={arabicFirst}
             onToggle={toggleOrientation}
             onImport={openImport}
+            s={s}
+            C={C}
           />
           <View style={[s.emptyFlex, s.center]}>
             <View style={s.centeredCard}>
@@ -270,6 +269,8 @@ export default function FlashcardsScreen() {
           onChangeText={setImportText}
           onLoad={handleLoadCards}
           onCancel={() => setShowImport(false)}
+          s={s}
+          C={C}
         />
       </View>
     );
@@ -300,12 +301,29 @@ export default function FlashcardsScreen() {
               <Text style={[s.actionBtnText, { color: C.textDark }]}>Done</Text>
             </Pressable>
             {!reviewWeek && (
-              <Pressable onPress={() => router.push('/archive')}>
-                <Text style={s.archiveLink}>Past Weeks →</Text>
-              </Pressable>
+              <>
+                <Pressable onPress={() => router.push('/archive')}>
+                  <Text style={s.archiveLink}>Past Weeks →</Text>
+                </Pressable>
+                <Pressable onPress={openImport} style={s.importBtn}>
+                  <Text style={s.importBtnText}>Import new cards +</Text>
+                </Pressable>
+              </>
             )}
           </View>
         </SafeAreaView>
+        <ImportModal
+          visible={showImport}
+          text={importText}
+          error={importError}
+          success={importSuccess}
+          loading={importing}
+          onChangeText={setImportText}
+          onLoad={handleLoadCards}
+          onCancel={() => setShowImport(false)}
+          s={s}
+          C={C}
+        />
       </View>
     );
   }
@@ -346,9 +364,10 @@ export default function FlashcardsScreen() {
           onImport={!reviewWeek ? openImport : undefined}
           onArchive={!reviewWeek ? () => router.push('/archive') : undefined}
           onClear={!reviewWeek ? () => setShowClearConfirm(true) : undefined}
+          s={s}
+          C={C}
         />
 
-        {/* Progress */}
         <View style={s.progressSection}>
           <View style={s.progressTrack}>
             <View style={[s.progressFill, { width: `${(mastered / total) * 100}%` }]} />
@@ -358,7 +377,6 @@ export default function FlashcardsScreen() {
           </Text>
         </View>
 
-        {/* Flip card — key resets animation on every advance */}
         <StudyCard
           key={`${currentCard.id}-${sessionCardIndex}`}
           front={arabicFirst ? arabicFace : englishFace}
@@ -367,6 +385,7 @@ export default function FlashcardsScreen() {
           onRate={rate}
           onBack={goBack}
           canGoBack={history.length > 0}
+          s={s}
         />
       </SafeAreaView>
 
@@ -379,6 +398,8 @@ export default function FlashcardsScreen() {
         onChangeText={setImportText}
         onLoad={handleLoadCards}
         onCancel={() => setShowImport(false)}
+        s={s}
+        C={C}
       />
       <Modal visible={showClearConfirm} transparent animationType="fade">
         <View style={s.confirmOverlay}>
@@ -405,12 +426,7 @@ export default function FlashcardsScreen() {
 // ── TopBar ────────────────────────────────────────────────────────────────────
 
 function TopBar({
-  label,
-  arabicFirst,
-  onToggle,
-  onImport,
-  onArchive,
-  onClear,
+  label, arabicFirst, onToggle, onImport, onArchive, onClear, s, C,
 }: {
   label: string;
   arabicFirst: boolean;
@@ -418,6 +434,8 @@ function TopBar({
   onImport?: () => void;
   onArchive?: () => void;
   onClear?: () => void;
+  s: ReturnType<typeof makeStyles>;
+  C: AppColors;
 }) {
   return (
     <View style={s.topBar}>
@@ -453,12 +471,7 @@ function TopBar({
 // ── StudyCard ─────────────────────────────────────────────────────────────────
 
 function StudyCard({
-  front,
-  back,
-  frontDark,
-  onRate,
-  onBack,
-  canGoBack,
+  front, back, frontDark, onRate, onBack, canGoBack, s,
 }: {
   front: React.ReactNode;
   back: React.ReactNode;
@@ -466,6 +479,7 @@ function StudyCard({
   onRate: (r: 'again' | 'hard' | 'good') => void;
   onBack: () => void;
   canGoBack: boolean;
+  s: ReturnType<typeof makeStyles>;
 }) {
   const [flipped, setFlipped] = useState(false);
   const { height: screenHeight } = useWindowDimensions();
@@ -488,9 +502,9 @@ function StudyCard({
 
       {flipped ? (
         <View style={s.ratingRow}>
-          <RatingBtn label="Again" sub="↺" color={AGAIN_COLOR} onPress={() => onRate('again')} />
-          <RatingBtn label="Hard"  sub="~" color={HARD_COLOR}  onPress={() => onRate('hard')} />
-          <RatingBtn label="Good"  sub="✓" color={GOOD_COLOR}  onPress={() => onRate('good')} />
+          <RatingBtn label="Again" sub="↺" color={AGAIN_COLOR} onPress={() => onRate('again')} s={s} />
+          <RatingBtn label="Hard"  sub="~" color={HARD_COLOR}  onPress={() => onRate('hard')} s={s} />
+          <RatingBtn label="Good"  sub="✓" color={GOOD_COLOR}  onPress={() => onRate('good')} s={s} />
         </View>
       ) : (
         <TouchableOpacity onPress={() => setFlipped(true)} style={s.showAnswerBtn} activeOpacity={0.85}>
@@ -509,8 +523,9 @@ function StudyCard({
 
 // ── RatingBtn ─────────────────────────────────────────────────────────────────
 
-function RatingBtn({ label, sub, color, onPress }: {
+function RatingBtn({ label, sub, color, onPress, s }: {
   label: string; sub: string; color: string; onPress: () => void;
+  s: ReturnType<typeof makeStyles>;
 }) {
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.8} style={[s.ratingBtn, { backgroundColor: color }]}>
@@ -523,23 +538,30 @@ function RatingBtn({ label, sub, color, onPress }: {
 // ── ImportModal ───────────────────────────────────────────────────────────────
 
 function ImportModal({
-  visible, text, error, success, loading, onChangeText, onLoad, onCancel,
+  visible, text, error, success, loading, onChangeText, onLoad, onCancel, s, C,
 }: {
   visible: boolean; text: string; error: string; success: string; loading: boolean;
   onChangeText: (t: string) => void; onLoad: () => void; onCancel: () => void;
+  s: ReturnType<typeof makeStyles>;
+  C: AppColors;
 }) {
   return (
     <Modal visible={visible} animationType="slide" transparent presentationStyle="overFullScreen">
       <KeyboardAvoidingView style={s.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={s.modalSheet}>
-          <Text style={s.modalTitle}>Paste Weekly Cards</Text>
-          <Text style={s.modalSub}>
-            JSON array — each item needs: english, arabic, transliteration, situation.
-          </Text>
-          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets
+            contentContainerStyle={s.modalBody}
+          >
+            <Text style={s.modalTitle}>Paste Weekly Cards</Text>
+            <Text style={s.modalSub}>
+              JSON array — each item needs: english, arabic, transliteration, situation.
+            </Text>
             <TextInput
               style={[s.jsonInput, error ? s.jsonInputError : null]}
               multiline
+              scrollEnabled
               placeholder={'[\n  {\n    "english": "How are you?",\n    "arabic": "كيف حالك؟",\n    "transliteration": "kayf ḥalak?",\n    "situation": "Greeting a friend"\n  }\n]'}
               placeholderTextColor={C.mutedDark}
               value={text}
@@ -547,22 +569,22 @@ function ImportModal({
               autoCorrect={false}
               autoCapitalize="none"
             />
+            {!!error   && <Text style={s.importError}>{error}</Text>}
+            {!!success && <Text style={s.importSuccess}>✓ {success}</Text>}
+            <View style={s.modalActions}>
+              <Pressable onPress={onCancel} style={s.actionBtnSecondary}>
+                <Text style={[s.actionBtnText, { color: C.textDark }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={onLoad}
+                disabled={loading || !text.trim()}
+                style={[s.actionBtnPrimary, (loading || !text.trim()) && { opacity: 0.45 }]}>
+                {loading
+                  ? <ActivityIndicator size="small" color={C.textLight} />
+                  : <Text style={s.actionBtnText}>Load Cards</Text>}
+              </Pressable>
+            </View>
           </ScrollView>
-          {!!error   && <Text style={s.importError}>{error}</Text>}
-          {!!success && <Text style={s.importSuccess}>✓ {success}</Text>}
-          <View style={s.modalActions}>
-            <Pressable onPress={onCancel} style={s.actionBtnSecondary}>
-              <Text style={[s.actionBtnText, { color: C.textDark }]}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              onPress={onLoad}
-              disabled={loading || !text.trim()}
-              style={[s.actionBtnPrimary, (loading || !text.trim()) && { opacity: 0.45 }]}>
-              {loading
-                ? <ActivityIndicator size="small" color={C.textLight} />
-                : <Text style={s.actionBtnText}>Load Cards</Text>}
-            </Pressable>
-          </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -571,297 +593,129 @@ function ImportModal({
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.sand },
-  safe: { flex: 1 },
-  center: { alignItems: 'center', justifyContent: 'center' },
-  emptyFlex: { flex: 1 },
+function makeStyles(C: AppColors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: C.scrollBg },
+    safe: { flex: 1 },
+    center: { alignItems: 'center', justifyContent: 'center' },
+    emptyFlex: { flex: 1 },
 
-  // Top bar
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 10,
-    gap: 8,
-  },
-  topBarLabel: {
-    flex: 1,
-    color: C.mutedDark,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  topBarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  archiveLink: { color: C.gold, fontSize: 13, fontWeight: '700' },
-  importBtn: {
-    backgroundColor: C.bg,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  importBtnText: { color: C.textLight, fontWeight: '700', fontSize: 12 },
-  swapBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: C.cardLight,
-    borderWidth: 1,
-    borderColor: C.borderGold,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  swapBtnActive: { backgroundColor: C.bg },
-  swapIcon: { fontSize: 17, fontWeight: '700', color: C.textDark },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingTop: 14,
+      paddingBottom: 10,
+      gap: 8,
+    },
+    topBarLabel: { flex: 1, color: C.mutedDark, fontSize: 13, fontWeight: '600' },
+    topBarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    archiveLink: { color: C.gold, fontSize: 13, fontWeight: '700' },
+    importBtn: { backgroundColor: C.blackGlass, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+    importBtnText: { color: C.textLight, fontWeight: '700', fontSize: 12 },
+    swapBtn: {
+      width: 34, height: 34, borderRadius: 17,
+      backgroundColor: C.cardLight,
+      borderWidth: 1, borderColor: C.borderGold,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    swapBtnActive: { backgroundColor: C.blackGlass },
+    swapIcon: { fontSize: 17, fontWeight: '700', color: C.textDark },
 
-  // Progress
-  progressSection: {
-    paddingHorizontal: 16,
-    gap: 6,
-    marginBottom: 8,
-  },
-  progressTrack: {
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: 'rgba(44,37,28,0.18)',
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 3,
-    backgroundColor: C.olive,
-  },
-  progressLabel: {
-    textAlign: 'center',
-    color: C.mutedDark,
-    fontSize: 13,
-    fontWeight: '500',
-  },
+    progressSection: { paddingHorizontal: 16, gap: 6, marginBottom: 8 },
+    progressTrack: { height: 5, borderRadius: 3, backgroundColor: 'rgba(44,37,28,0.18)', overflow: 'hidden' },
+    progressFill:  { height: '100%', borderRadius: 3, backgroundColor: C.olive },
+    progressLabel: { textAlign: 'center', color: C.mutedDark, fontSize: 13, fontWeight: '500' },
 
-  // Card
-  studyArea: {
-    paddingHorizontal: 16,
-    paddingBottom: Math.max(BottomTabInset, 96) + 20,
-    paddingTop: 4,
-    gap: 14,
-  },
-  cardContainer: {
-    borderRadius: 22,
-    overflow: 'hidden',
-  },
-  cardFace: {
-    height: '100%',
-    borderRadius: 22,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  cardFaceLight: {
-    backgroundColor: C.cardLight,
-    borderColor: C.borderGold,
-  },
-  cardFaceDark: {
-    backgroundColor: C.cardDark,
-    borderColor: C.borderGoldBright,
-  },
+    studyArea: {
+      paddingHorizontal: 16,
+      paddingBottom: Math.max(BottomTabInset, 96) + 20,
+      paddingTop: 4,
+      gap: 14,
+    },
+    cardContainer: { borderRadius: 22, overflow: 'hidden' },
+    cardFace: {
+      height: '100%', borderRadius: 22, borderWidth: 1.5,
+      alignItems: 'center', justifyContent: 'center', padding: 24,
+    },
+    cardFaceLight: { backgroundColor: C.cardLight,  borderColor: C.borderGold },
+    cardFaceDark:  { backgroundColor: C.cardDark,   borderColor: C.borderGoldBright },
 
-  // Face content
-  faceContainer: { alignItems: 'center', gap: 10, width: '100%' },
-  englishMain: {
-    color: C.textDark,
-    fontSize: 26,
-    fontWeight: '700',
-    textAlign: 'center',
-    lineHeight: 34,
-  },
-  situationText: {
-    color: C.mutedDark,
-    fontSize: 14,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  backEnglish: {
-    color: C.mutedLight,
-    fontSize: 13,
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  arabicMain: {
-    color: C.textLight,
-    fontSize: 32,
-    fontWeight: '700',
-    textAlign: 'center',
-    writingDirection: 'rtl',
-    lineHeight: 50,
-  },
-  translitText: {
-    color: C.mutedLight,
-    fontSize: 14,
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
-  showAnswerBtn: {
-    backgroundColor: C.bg,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  showAnswerText: {
-    color: C.textLight,
-    fontWeight: '700',
-    fontSize: 16,
-  },
+    faceContainer: { alignItems: 'center', gap: 10, width: '100%' },
+    englishMain: { color: C.textDark, fontSize: 26, fontWeight: '700', textAlign: 'center', lineHeight: 34 },
+    situationText: { color: C.mutedDark, fontSize: 14, fontStyle: 'italic', textAlign: 'center', lineHeight: 20 },
+    backEnglish:   { color: C.mutedLight, fontSize: 13, textAlign: 'center', marginBottom: 4 },
+    arabicMain:    { color: C.textLight, fontSize: 32, fontWeight: '700', textAlign: 'center', writingDirection: 'rtl', lineHeight: 50 },
+    translitText:  { color: C.mutedLight, fontSize: 14, fontStyle: 'italic', textAlign: 'center' },
 
-  // Rating buttons
-  ratingRow: { flexDirection: 'row', gap: 10 },
-  ratingBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: 'center',
-    gap: 2,
-  },
-  ratingBtnSub:   { color: 'rgba(255,255,255,0.65)', fontSize: 12 },
-  ratingBtnLabel: { color: '#fff', fontWeight: '700', fontSize: 16 },
+    showAnswerBtn:  { backgroundColor: C.blackGlass, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+    showAnswerText: { color: C.textLight, fontWeight: '700', fontSize: 16 },
 
-  // Empty / loading states
-  centeredCard: {
-    alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 32,
-    maxWidth: 340,
-  },
-  bigEmoji: { fontSize: 64, textAlign: 'center' },
-  emptyTitle: { color: C.textDark, fontSize: 22, fontWeight: '700', textAlign: 'center' },
-  emptySub:   { color: C.mutedDark, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+    ratingRow: { flexDirection: 'row', gap: 10 },
+    ratingBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: 'center', gap: 2 },
+    ratingBtnSub:   { color: 'rgba(255,255,255,0.65)', fontSize: 12 },
+    ratingBtnLabel: { color: '#fff', fontWeight: '700', fontSize: 16 },
 
-  // Completion
-  completionCard: {
-    backgroundColor: C.cardDark,
-    borderRadius: 22,
-    borderWidth: 1.5,
-    borderColor: C.borderGoldBright,
-    padding: 28,
-    marginHorizontal: 20,
-    alignItems: 'center',
-    gap: 10,
-  },
-  completionArabic: {
-    color: C.gold,
-    fontSize: 36,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  completionTitle: { color: C.textLight, fontSize: 22, fontWeight: '700', textAlign: 'center' },
-  completionSub:   { color: C.mutedLight, fontSize: 15, textAlign: 'center' },
-  completionHint:  { color: C.gold, fontSize: 13, textAlign: 'center', marginBottom: 4 },
+    centeredCard: { alignItems: 'center', gap: 14, paddingHorizontal: 32, maxWidth: 340 },
+    bigEmoji:  { fontSize: 64, textAlign: 'center' },
+    emptyTitle:{ color: C.textDark, fontSize: 22, fontWeight: '700', textAlign: 'center' },
+    emptySub:  { color: C.mutedDark, fontSize: 14, textAlign: 'center', lineHeight: 20 },
 
-  // Shared buttons
-  actionBtnPrimary: {
-    backgroundColor: C.bg,
-    paddingHorizontal: Spacing.five,
-    paddingVertical: Spacing.three,
-    borderRadius: 12,
-    minWidth: 140,
-    alignItems: 'center',
-  },
-  actionBtnSecondary: {
-    backgroundColor: C.cardLight,
-    borderWidth: 1.5,
-    borderColor: C.borderGold,
-    paddingHorizontal: Spacing.five,
-    paddingVertical: Spacing.three,
-    borderRadius: 12,
-    minWidth: 140,
-    alignItems: 'center',
-  },
-  actionBtnText: { color: C.textLight, fontWeight: '700', fontSize: 15 },
+    completionCard: {
+      backgroundColor: C.cardDark,
+      borderRadius: 22, borderWidth: 1.5, borderColor: C.borderGoldBright,
+      padding: 28, marginHorizontal: 20, alignItems: 'center', gap: 10,
+    },
+    completionArabic:{ color: C.gold, fontSize: 36, fontWeight: '800', textAlign: 'center' },
+    completionTitle: { color: C.textLight, fontSize: 22, fontWeight: '700', textAlign: 'center' },
+    completionSub:   { color: C.mutedLight, fontSize: 15, textAlign: 'center' },
+    completionHint:  { color: C.gold, fontSize: 13, textAlign: 'center', marginBottom: 4 },
 
-  // Import modal
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  modalSheet: {
-    backgroundColor: C.cardLight,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    padding: 24,
-    maxHeight: '85%',
-  },
-  modalTitle: {
-    color: C.textDark,
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 6,
-  },
-  modalSub: {
-    color: C.mutedDark,
-    fontSize: 13,
-    marginBottom: 14,
-    lineHeight: 19,
-  },
-  jsonInput: {
-    minHeight: 200,
-    backgroundColor: C.sand,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: C.borderGold,
-    padding: 14,
-    fontSize: 13,
-    color: C.textDark,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    textAlignVertical: 'top',
-    marginBottom: 8,
-  },
-  jsonInputError: { borderColor: AGAIN_COLOR },
-  importError:   { color: AGAIN_COLOR, fontSize: 13, marginTop: 6 },
-  importSuccess: { color: GOOD_COLOR,  fontSize: 13, marginTop: 6 },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 14,
-  },
+    actionBtnPrimary: {
+      backgroundColor: C.blackGlass,
+      paddingHorizontal: Spacing.five, paddingVertical: Spacing.three,
+      borderRadius: 12, minWidth: 140, alignItems: 'center',
+    },
+    actionBtnSecondary: {
+      backgroundColor: C.cardLight,
+      borderWidth: 1.5, borderColor: C.borderGold,
+      paddingHorizontal: Spacing.five, paddingVertical: Spacing.three,
+      borderRadius: 12, minWidth: 140, alignItems: 'center',
+    },
+    actionBtnText: { color: C.textLight, fontWeight: '700', fontSize: 15 },
 
-  // Back button
-  backBtn: {
-    alignSelf: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  backBtnText: { color: C.mutedDark, fontSize: 13, fontWeight: '600' },
+    modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
+    modalSheet: {
+      backgroundColor: C.cardLight,
+      borderTopLeftRadius: 22, borderTopRightRadius: 22,
+      maxHeight: '88%',
+    },
+    modalBody: { padding: 24, paddingBottom: 32 },
+    modalTitle: { color: C.textDark, fontSize: 18, fontWeight: '800', marginBottom: 6 },
+    modalSub:   { color: C.mutedDark, fontSize: 13, marginBottom: 14, lineHeight: 19 },
+    jsonInput: {
+      minHeight: 200,
+      backgroundColor: C.scrollBg,
+      borderRadius: 10, borderWidth: 1.5, borderColor: C.borderGold,
+      padding: 14, fontSize: 13, color: C.textDark,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+      textAlignVertical: 'top', marginBottom: 8,
+    },
+    jsonInputError: { borderColor: AGAIN_COLOR },
+    importError:    { color: AGAIN_COLOR, fontSize: 13, marginTop: 6 },
+    importSuccess:  { color: GOOD_COLOR,  fontSize: 13, marginTop: 6 },
+    modalActions:   { flexDirection: 'row', gap: 12, marginTop: 14 },
 
-  // Clear button (TopBar)
-  clearBtn: {
-    backgroundColor: 'rgba(192,57,43,0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(192,57,43,0.35)',
-  },
-  clearBtnText: { color: AGAIN_COLOR, fontWeight: '700', fontSize: 12 },
+    backBtn:     { alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 8 },
+    backBtnText: { color: C.mutedDark, fontSize: 13, fontWeight: '600' },
 
-  // Clear confirmation modal
-  confirmOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  confirmSheet: {
-    backgroundColor: C.cardLight,
-    borderRadius: 20,
-    padding: 24,
-    width: '100%',
-    maxWidth: 340,
-    gap: 12,
-  },
-  confirmTitle: { color: C.textDark, fontSize: 18, fontWeight: '800' },
-  confirmSub: { color: C.mutedDark, fontSize: 14, lineHeight: 20 },
-  confirmActions: { flexDirection: 'row', gap: 12, marginTop: 4 },
-});
+    clearBtn:     { backgroundColor: 'rgba(192,57,43,0.15)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(192,57,43,0.35)' },
+    clearBtnText: { color: AGAIN_COLOR, fontWeight: '700', fontSize: 12 },
+
+    confirmOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+    confirmSheet:   { backgroundColor: C.cardLight, borderRadius: 20, padding: 24, width: '100%', maxWidth: 340, gap: 12 },
+    confirmTitle:   { color: C.textDark, fontSize: 18, fontWeight: '800' },
+    confirmSub:     { color: C.mutedDark, fontSize: 14, lineHeight: 20 },
+    confirmActions: { flexDirection: 'row', gap: 12, marginTop: 4 },
+  });
+}

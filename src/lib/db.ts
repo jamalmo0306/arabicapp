@@ -8,6 +8,7 @@ import type {
   FlashcardArchiveEntry,
   FlashcardReview,
   Session,
+  Song,
   UserSettings,
   WeeklyCheckIn,
   WeeklySummary,
@@ -113,6 +114,16 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       total_minutes INTEGER NOT NULL DEFAULT 0,
       most_used_activity TEXT NOT NULL DEFAULT '',
       notes TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS songs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL DEFAULT '',
+      arabic_lyrics TEXT NOT NULL DEFAULT '',
+      transliteration TEXT NOT NULL DEFAULT '',
+      english_translation TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL
     );
   `);
@@ -445,6 +456,11 @@ export async function getAllActivityLog(): Promise<ActivityLog[]> {
   );
 }
 
+export async function deleteActivityLog(id: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`DELETE FROM activity_log WHERE id = ?`, id);
+}
+
 // ── Weekly Summary ────────────────────────────────────────────────────────────
 
 export async function insertOrUpdateWeeklySummary(
@@ -469,5 +485,36 @@ export async function getAllWeeklySummaries(): Promise<WeeklySummary[]> {
   const db = await getDb();
   return db.getAllAsync<WeeklySummary>(
     `SELECT * FROM weekly_summary ORDER BY week_number DESC`
+  );
+}
+
+// ── Songs ─────────────────────────────────────────────────────────────────────
+
+export async function insertSong(song: Omit<Song, 'id'>): Promise<number> {
+  const db = await getDb();
+  const result = await db.runAsync(
+    `INSERT INTO songs (title, artist, arabic_lyrics, transliteration, english_translation, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    song.title, song.artist, song.arabic_lyrics,
+    song.transliteration, song.english_translation, song.created_at
+  );
+  return result.lastInsertRowId;
+}
+
+export async function getAllSongs(): Promise<Song[]> {
+  const db = await getDb();
+  return db.getAllAsync<Song>(`SELECT * FROM songs ORDER BY created_at DESC`);
+}
+
+export async function deleteSong(id: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`DELETE FROM songs WHERE id = ?`, id);
+}
+
+export async function updateSong(id: number, song: Omit<Song, 'id' | 'created_at'>): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE songs SET title=?, artist=?, arabic_lyrics=?, transliteration=?, english_translation=? WHERE id=?`,
+    song.title, song.artist, song.arabic_lyrics, song.transliteration, song.english_translation, id
   );
 }

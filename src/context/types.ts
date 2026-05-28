@@ -137,6 +137,16 @@ export interface BadgeDefinition {
   description: string;
 }
 
+export interface Song {
+  id: number;
+  title: string;
+  artist: string;
+  arabic_lyrics: string;
+  transliteration: string;
+  english_translation: string;
+  created_at: string;
+}
+
 export interface RawImportCard {
   english: string;
   arabic: string;

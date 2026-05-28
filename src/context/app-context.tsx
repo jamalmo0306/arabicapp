@@ -42,6 +42,8 @@ import {
   insertSession,
   markArchiveCard as dbMarkArchiveCard,
   updateSettings,
+  deleteActivityLog,
+  getAllActivityLog,
 } from '@/lib/db';
 import {
   BADGE_DEFINITIONS,
@@ -52,12 +54,15 @@ import {
   toDateString,
   XP,
 } from '@/lib/xp';
+import { type AppColors, getColors } from '@/lib/theme';
 
 interface AppContextValue {
   isDbReady: boolean;
   streak: number;
   xpTotal: number;
   unlockedBadges: Badge[];
+  colors: AppColors;
+  isDark: boolean;
   settings: UserSettings;
   pendingCheckIn: boolean;
   currentWeekCards: FlashcardArchiveEntry[];
@@ -80,6 +85,7 @@ interface AppContextValue {
   importWeeklyCards(weekNumber: number, rawCards: RawImportCard[]): Promise<void>;
   clearWeekCards(weekNumber: number): Promise<void>;
   dismissWeekComplete(): void;
+  deleteLog(id: number): Promise<void>;
 }
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -118,6 +124,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [currentWeekCards, setCurrentWeekCards] = useState<FlashcardArchiveEntry[]>([]);
   const [weekCompleteInfo, setWeekCompleteInfo] = useState<{ completedWeek: number } | null>(null);
   const [weekActivityDates, setWeekActivityDates] = useState<string[]>([]);
+
+  const isDark = settings.dark_mode === 'dark';
+  const colors = getColors(settings.dark_mode);
 
   const confettiRef = useRef<{ start: () => void } | null>(null);
 
@@ -250,6 +259,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const dismissWeekComplete = useCallback(() => setWeekCompleteInfo(null), []);
+
+  const deleteLog = useCallback(async (id: number) => {
+    await deleteActivityLog(id);
+
+    // Recalculate streak from all remaining activity log dates
+    const allLogs = await getAllActivityLog();
+    const sortedDates = [...new Set(allLogs.map(l => l.date))].sort().reverse();
+    const newStreak = computeStreakFromDates(sortedDates);
+    const lastDate = sortedDates[0] ?? null;
+    await updateSettings({ streak_count: newStreak, last_session_date: lastDate });
+    setStreak(newStreak);
+    setSettings(prev => ({ ...prev, streak_count: newStreak, last_session_date: lastDate }));
+
+    // Refresh week dots
+    const currentSettings = await getSettings();
+    const weekLogs = await getActivityLogByWeek(currentSettings.current_week);
+    setWeekActivityDates([...new Set(weekLogs.map(l => l.date))]);
+  }, []);
 
   const refreshStats = useCallback(async () => {
     const [s, badges] = await Promise.all([getSettings(), getAllBadges()]);
@@ -452,6 +479,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         currentWeekCards,
         weekCompleteInfo,
         weekActivityDates,
+        colors,
+        isDark,
         logSession,
         saveFlashcardBatch,
         saveCheckIn,
@@ -462,11 +491,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         importWeeklyCards,
         clearWeekCards,
         dismissWeekComplete,
+        deleteLog,
       }}
     >
       {children}
     </AppContext.Provider>
   );
+}
+
+function computeStreakFromDates(sortedDatesDesc: string[]): number {
+  if (sortedDatesDesc.length === 0) return 0;
+  const today = toDateString();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+  if (sortedDatesDesc[0] !== today && sortedDatesDesc[0] !== yesterdayStr) return 0;
+  let streak = 1;
+  for (let i = 1; i < sortedDatesDesc.length; i++) {
+    const prev = new Date(sortedDatesDesc[i - 1]);
+    prev.setDate(prev.getDate() - 1);
+    if (sortedDatesDesc[i] === prev.toISOString().slice(0, 10)) streak++;
+    else break;
+  }
+  return streak;
 }
 
 function countFullPillarWeeks(sessions: Session[]): number {

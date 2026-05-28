@@ -11,11 +11,12 @@ const C = {
 };
 
 const TABS = [
-  { name: 'index',      route: '/(tabs)/',           icon: '🏠', label: 'Home'      },
-  { name: 'flashcards', route: '/(tabs)/flashcards',  icon: '🎴', label: 'Cards'     },
-  { name: 'log',        route: '/(tabs)/log',         icon: '📊', label: 'Log'       },
-  { name: 'resources',  route: '/(tabs)/resources',   icon: '📖', label: 'Resources' },
-  { name: 'settings',   route: '/(tabs)/settings',    icon: '⚙️', label: 'Settings'  },
+  { name: 'index',      route: '/(tabs)/',           icon: '🏠', label: 'Home'    },
+  { name: 'flashcards', route: '/(tabs)/flashcards',  icon: '🎴', label: 'Cards'   },
+  { name: 'log',        route: '/(tabs)/log',         icon: '📊', label: 'Log'     },
+  { name: 'music',      route: '/(tabs)/music',       icon: '🎵', label: 'Music'   },
+  { name: 'resources',  route: '/(tabs)/resources',   icon: '📖', label: 'Library' },
+  { name: 'settings',   route: '/(tabs)/settings',    icon: '⚙️', label: 'Settings'},
 ] as const;
 
 export default function BottomNav() {
@@ -78,6 +79,6 @@ const s = StyleSheet.create({
   itemActive:  { backgroundColor: C.navActiveTab },
   icon:        { fontSize: 20, color: C.iconInactive, marginBottom: 4 },
   iconActive:  { fontSize: 22, marginBottom: 4 },
-  label:       { color: C.labelInactive, fontSize: 12, fontWeight: '700' },
-  labelActive: { color: C.olive, fontSize: 12, fontWeight: '800' },
+  label:       { color: C.labelInactive, fontSize: 10, fontWeight: '700' },
+  labelActive: { color: C.olive, fontSize: 10, fontWeight: '800' },
 });
